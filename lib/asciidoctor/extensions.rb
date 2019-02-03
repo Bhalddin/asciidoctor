@@ -1,6 +1,6 @@
-require 'asciidoctor'.to_s unless defined? Asciidoctor
+# allow `require 'asciidoctor/extensions'` to be used to fully load asciidoctor gem
+(require 'asciidoctor' unless defined? Asciidoctor.load) unless RUBY_ENGINE == 'opal'
 
-# encoding: UTF-8
 module Asciidoctor
 # Extensions provide a way to participate in the parsing and converting
 # phases of the AsciiDoc processor or extend the AsciiDoc syntax.
@@ -65,14 +65,12 @@ module Extensions
       #
       # Returns nothing
       def use_dsl
-        if self.name.nil_or_empty?
-          # NOTE contants(false) doesn't exist in Ruby 1.8.7
-          #include const_get :DSL if constants(false).grep :DSL
-          include const_get :DSL if constants.grep :DSL
-        else
-          # NOTE contants(false) doesn't exist in Ruby 1.8.7
-          #extend const_get :DSL if constants(false).grep :DSL
-          extend const_get :DSL if constants.grep :DSL
+        if const_defined? :DSL
+          if self.name.nil_or_empty?
+            include const_get :DSL
+          else
+            extend const_get :DSL
+          end
         end
       end
       alias extend_dsl use_dsl
@@ -91,7 +89,7 @@ module Extensions
     end
 
     def process *args
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::Processor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{Processor} subclass #{self.class} must implement the ##{__method__} method)
     end
 
     # QUESTION should attributes be an option instead of a parameter?
@@ -115,38 +113,70 @@ module Extensions
     # Returns a [Section] node with all properties properly initialized.
     def create_section parent, title, attrs, opts = {}
       doc = parent.document
-      doctype, level = doc.doctype, (opts[:level] || parent.level + 1)
+      book = (doctype = doc.doctype) == 'book'
+      level = opts[:level] || parent.level + 1
       if (style = attrs.delete 'style')
-        if style == 'abstract' && doctype == 'book'
+        if book && style == 'abstract'
           sectname, level = 'chapter', 1
         else
           sectname, special = style, true
           level = 1 if level == 0
         end
-      elsif doctype == 'book'
-        sectname = level == 0 ? 'part' : (level == 1 ? 'chapter' : 'section')
+      elsif book
+        sectname = level == 0 ? 'part' : (level > 1 ? 'section' : 'chapter')
       elsif doctype == 'manpage' && (title.casecmp 'synopsis') == 0
         sectname, special = 'synopsis', true
       else
         sectname = 'section'
       end
-      sect = Section.new parent, level, false
+      sect = Section.new parent, level
       sect.title, sect.sectname = title, sectname
       if special
         sect.special = true
-        sect.numbered = true if opts.fetch :numbered, (style == 'appendix')
-      elsif opts.fetch :numbered, (level > 0 && (doc.attributes.key? 'sectnums'))
-        sect.numbered = sect.special ? (parent.context == :section && parent.numbered) : true
+        if opts.fetch :numbered, (style == 'appendix')
+          sect.numbered = true
+        elsif !(opts.key? :numbered) && (doc.attr? 'sectnums', 'all')
+          sect.numbered = book && level == 1 ? :chapter : true
+        end
+      elsif level > 0
+        if opts.fetch :numbered, (doc.attr? 'sectnums')
+          sect.numbered = sect.special ? parent.numbered && true : true
+        end
+      else
+        sect.numbered = true if opts.fetch :numbered, (book && (doc.attr? 'partnums'))
       end
       unless (id = attrs.delete 'id') == false
-        sect.id = attrs['id'] = id || ((doc.attributes.key? 'sectids') ? (Section.generate_id sect.title, doc) : nil)
+        sect.id = attrs['id'] = id || ((doc.attr? 'sectids') ? (Section.generate_id sect.title, doc) : nil)
       end
       sect.update_attributes attrs
       sect
     end
 
     def create_block parent, context, source, attrs, opts = {}
-      Block.new parent, context, { :source => source, :attributes => attrs }.merge(opts)
+      Block.new parent, context, { source: source, attributes: attrs }.merge(opts)
+    end
+
+    # Public: Creates a list node and links it to the specified parent.
+    #
+    # parent - The parent Block (Block, Section, or Document) of this new list block.
+    # context - The list context (e.g., :ulist, :olist, :colist, :dlist)
+    # attrs  - A Hash of attributes to set on this list block
+    #
+    # Returns a [List] node with all properties properly initialized.
+    def create_list parent, context, attrs = nil
+      list = List.new parent, context
+      list.update_attributes attrs if attrs
+      list
+    end
+
+    # Public: Creates a list item node and links it to the specified parent.
+    #
+    # parent - The parent List of this new list item block.
+    # text   - The text of the list item.
+    #
+    # Returns a [ListItem] node with all properties properly initialized.
+    def create_list_item parent, text = nil
+      ListItem.new parent, text
     end
 
     # Public: Creates an image block node and links it to the specified parent.
@@ -163,7 +193,13 @@ module Extensions
         raise ::ArgumentError, 'Unable to create an image block, target attribute is required'
       end
       attrs['alt'] ||= (attrs['default-alt'] = Helpers.basename(target, true).tr('_-', ' '))
-      create_block parent, :image, nil, attrs, opts
+      title = (attrs.key? 'title') ? (attrs.delete 'title') : nil
+      block = create_block parent, :image, nil, attrs, opts
+      if title
+        block.title = title
+        block.assign_caption((attrs.delete 'caption'), (opts[:caption_context] || 'figure'))
+      end
+      block
     end
 
     def create_inline parent, context, text, opts = {}
@@ -223,7 +259,7 @@ module Extensions
         # TODO need a test for this!
         @process_block.call(*args)
       else
-        # TODO add exception message here
+        # FIXME add exception message here
         raise ::NotImplementedError
       end
     end
@@ -233,7 +269,15 @@ module Extensions
     end
   end
 
-  module SyntaxDsl
+  module DocumentProcessorDsl
+    include ProcessorDsl
+
+    def prefer
+      option :position, :>>
+    end
+  end
+
+  module SyntaxProcessorDsl
     include ProcessorDsl
 
     def named value
@@ -330,10 +374,10 @@ module Extensions
   # Preprocessor implementations must extend the Preprocessor class.
   class Preprocessor < Processor
     def process document, reader
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::Preprocessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{Preprocessor} subclass #{self.class} must implement the ##{__method__} method)
     end
   end
-  Preprocessor::DSL = ProcessorDsl
+  Preprocessor::DSL = DocumentProcessorDsl
 
   # Public: TreeProcessors are run on the Document after the source has been
   # parsed into an abstract syntax tree (AST), as represented by the Document
@@ -347,10 +391,10 @@ module Extensions
   # QUESTION should the tree processor get invoked after parse header too?
   class TreeProcessor < Processor
     def process document
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::TreeProcessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{TreeProcessor} subclass #{self.class} must implement the ##{__method__} method)
     end
   end
-  TreeProcessor::DSL = ProcessorDsl
+  TreeProcessor::DSL = DocumentProcessorDsl
 
   # Alias deprecated class name for backwards compatibility
   Treeprocessor = TreeProcessor
@@ -372,10 +416,10 @@ module Extensions
   # Postprocessor implementations must Postprocessor.
   class Postprocessor < Processor
     def process document, output
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::Postprocessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{Postprocessor} subclass #{self.class} must implement the ##{__method__} method)
     end
   end
-  Postprocessor::DSL = ProcessorDsl
+  Postprocessor::DSL = DocumentProcessorDsl
 
   # Public: IncludeProcessors are used to process `include::<target>[]`
   # directives in the source document.
@@ -390,7 +434,7 @@ module Extensions
   # TODO add file extension or regexp as shortcut for handles? method
   class IncludeProcessor < Processor
     def process document, reader, target, attributes
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::IncludeProcessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{IncludeProcessor} subclass #{self.class} must implement the ##{__method__} method)
     end
 
     def handles? target
@@ -399,7 +443,7 @@ module Extensions
   end
 
   module IncludeProcessorDsl
-    include ProcessorDsl
+    include DocumentProcessorDsl
 
     def handles? *args, &block
       if block_given?
@@ -436,12 +480,12 @@ module Extensions
     end
 
     def process document
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::DocinfoProcessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{DocinfoProcessor} subclass #{self.class} must implement the ##{__method__} method)
     end
   end
 
   module DocinfoProcessorDsl
-    include ProcessorDsl
+    include DocumentProcessorDsl
 
     def at_location value
       option :location, value
@@ -492,12 +536,12 @@ module Extensions
     end
 
     def process parent, reader, attributes
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::BlockProcessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{BlockProcessor} subclass #{self.class} must implement the ##{__method__} method)
     end
   end
 
   module BlockProcessorDsl
-    include SyntaxDsl
+    include SyntaxProcessorDsl
 
     def contexts *value
       option :contexts, value.flatten.to_set
@@ -518,12 +562,12 @@ module Extensions
     end
 
     def process parent, target, attributes
-      raise ::NotImplementedError, %(Asciidoctor::Extensions::MacroProcessor subclass must implement ##{__method__} method)
+      raise ::NotImplementedError, %(#{MacroProcessor} subclass #{self.class} must implement the ##{__method__} method)
     end
   end
 
   module MacroProcessorDsl
-    include SyntaxDsl
+    include SyntaxProcessorDsl
 
     def resolves_attributes *args
       if args.size == 1 && !args[0]
@@ -542,6 +586,10 @@ module Extensions
   #
   # BlockMacroProcessor implementations must extend BlockMacroProcessor.
   class BlockMacroProcessor < MacroProcessor
+    def name
+      raise ::ArgumentError, %(invalid name for block macro: #{@name}) unless MacroNameRx.match? @name.to_s
+      @name
+    end
   end
   BlockMacroProcessor::DSL = MacroProcessorDsl
 
@@ -708,7 +756,7 @@ module Extensions
     #
     #   # as a method block
     #   preprocessor do
-    #     process |doc, reader|
+    #     process do |doc, reader|
     #       ...
     #     end
     #   end
@@ -760,7 +808,7 @@ module Extensions
     #
     #   # as a method block
     #   tree_processor do
-    #     process |document|
+    #     process do |document|
     #       ...
     #     end
     #   end
@@ -817,7 +865,7 @@ module Extensions
     #
     #   # as a method block
     #   postprocessor do
-    #     process |document, output|
+    #     process do |document, output|
     #       ...
     #     end
     #   end
@@ -869,7 +917,7 @@ module Extensions
     #
     #   # as a method block
     #   include_processor do
-    #     process |document, output|
+    #     process do |document, output|
     #       ...
     #     end
     #   end
@@ -914,14 +962,14 @@ module Extensions
     #   docinfo_processor MetaRobotsDocinfoProcessor
     #
     #   # as an instance of a DocinfoProcessor subclass with an explicit location
-    #   docinfo_processor JQueryDocinfoProcessor.new, :location => :footer
+    #   docinfo_processor JQueryDocinfoProcessor.new, location: :footer
     #
     #   # as a name of a DocinfoProcessor subclass
     #   docinfo_processor 'MetaRobotsDocinfoProcessor'
     #
     #   # as a method block
     #   docinfo_processor do
-    #     process |doc|
+    #     process do |doc|
     #       at_location :footer
     #       'footer content'
     #     end
@@ -1010,14 +1058,14 @@ module Extensions
     #   # as a method block
     #   block do
     #     named :shout
-    #     process |parent, reader, attrs|
+    #     process do |parent, reader, attrs|
     #       ...
     #     end
     #   end
     #
     #   # as a method block with an explicit block name
     #   block :shout do
-    #     process |parent, reader, attrs|
+    #     process do |parent, reader, attrs|
     #       ...
     #     end
     #   end
@@ -1099,14 +1147,14 @@ module Extensions
     #   # as a method block
     #   block_macro do
     #     named :gist
-    #     process |parent, target, attrs|
+    #     process do |parent, target, attrs|
     #       ...
     #     end
     #   end
     #
     #   # as a method block with an explicit macro name
     #   block_macro :gist do
-    #     process |parent, target, attrs|
+    #     process do |parent, target, attrs|
     #       ...
     #     end
     #   end
@@ -1171,7 +1219,7 @@ module Extensions
     #   inline_macro ChromeInlineMacro
     #
     #   # as an InlineMacroProcessor subclass with an explicit macro name
-    #   inline_macro ChromeInineMacro, :chrome
+    #   inline_macro ChromeInlineMacro, :chrome
     #
     #   # as an instance of an InlineMacroProcessor subclass
     #   inline_macro ChromeInlineMacro.new
@@ -1183,19 +1231,19 @@ module Extensions
     #   inline_macro 'ChromeInlineMacro'
     #
     #   # as a name of an InlineMacroProcessor subclass with an explicit macro name
-    #   inline_macro 'ChromeInineMacro', :chrome
+    #   inline_macro 'ChromeInlineMacro', :chrome
     #
     #   # as a method block
     #   inline_macro do
     #     named :chrome
-    #     process |parent, target, attrs|
+    #     process do |parent, target, attrs|
     #       ...
     #     end
     #   end
     #
     #   # as a method block with an explicit macro name
     #   inline_macro :chrome do
-    #     process |parent, target, attrs|
+    #     process do |parent, target, attrs|
     #       ...
     #     end
     #   end
@@ -1243,13 +1291,33 @@ module Extensions
       @inline_macro_extensions.values
     end
 
+    # Public: Inserts the document processor {Extension} instance as the first
+    # processor of its kind in the extension registry.
+    #
+    # Examples
+    #
+    #   prefer :include_processor do
+    #     process do |document, reader, target, attrs|
+    #       ...
+    #     end
+    #   end
+    #
+    # Returns the [Extension] stored in the registry that proxies the instance
+    # of this processor.
+    def prefer *args, &block
+      extension = ProcessorExtension === (arg0 = args.shift) ? arg0 : (send arg0, *args, &block)
+      extensions_store = instance_variable_get(%(@#{extension.kind}_extensions).to_sym)
+      extensions_store.unshift extensions_store.delete extension
+      extension
+    end
+
     private
 
     def add_document_processor kind, args, &block
       kind_name = kind.to_s.tr '_', ' '
       kind_class_symbol = kind_name.split.map {|it| it.capitalize }.join.to_sym
-      kind_class = Extensions.const_get kind_class_symbol
-      kind_java_class = (defined? ::AsciidoctorJ) ? (::AsciidoctorJ::Extensions.const_get kind_class_symbol) : nil
+      kind_class = Extensions.const_get kind_class_symbol, false
+      kind_java_class = (defined? ::AsciidoctorJ) ? (::AsciidoctorJ::Extensions.const_get kind_class_symbol, false) : nil
       kind_store = instance_variable_get(%(@#{kind}_extensions).to_sym) || instance_variable_set(%(@#{kind}_extensions).to_sym, [])
       # style 1: specified as block
       extension = if block_given?
@@ -1260,8 +1328,7 @@ module Extensions
         #class << processor
         #  include_dsl
         #end
-        # NOTE kind_class.contants(false) doesn't exist in Ruby 1.8.7
-        processor.extend kind_class.const_get :DSL if kind_class.constants.grep :DSL
+        processor.extend kind_class.const_get :DSL if kind_class.const_defined? :DSL
         processor.instance_exec(&block)
         processor.freeze
         unless processor.process_block_given?
@@ -1271,7 +1338,7 @@ module Extensions
       else
         processor, config = resolve_args args, 2
         # style 2: specified as Class or String class name
-        if (processor_class = Extensions.resolve_class processor)
+        if (processor_class = Helpers.resolve_class processor)
           unless processor_class < kind_class || (kind_java_class && processor_class < kind_java_class)
             raise ::ArgumentError, %(Invalid type for #{kind_name} extension: #{processor})
           end
@@ -1288,18 +1355,15 @@ module Extensions
         end
       end
 
-      if extension.config[:position] == :>>
-        kind_store.unshift extension
-      else
-        kind_store << extension
-      end
+      extension.config[:position] == :>> ? (kind_store.unshift extension) : (kind_store << extension)
+      extension
     end
 
     def add_syntax_processor kind, args, &block
       kind_name = kind.to_s.tr '_', ' '
       kind_class_symbol = (kind_name.split.map {|it| it.capitalize }.push 'Processor').join.to_sym
-      kind_class = Extensions.const_get kind_class_symbol
-      kind_java_class = (defined? ::AsciidoctorJ) ? (::AsciidoctorJ::Extensions.const_get kind_class_symbol) : nil
+      kind_class = Extensions.const_get kind_class_symbol, false
+      kind_java_class = (defined? ::AsciidoctorJ) ? (::AsciidoctorJ::Extensions.const_get kind_class_symbol, false) : nil
       kind_store = instance_variable_get(%(@#{kind}_extensions).to_sym) || instance_variable_set(%(@#{kind}_extensions).to_sym, {})
       # style 1: specified as block
       if block_given?
@@ -1309,8 +1373,7 @@ module Extensions
         #class << processor
         #  include_dsl
         #end
-        # NOTE kind_class.contants(false) doesn't exist in Ruby 1.8.7
-        processor.extend kind_class.const_get :DSL if kind_class.constants.grep :DSL
+        processor.extend kind_class.const_get :DSL if kind_class.const_defined? :DSL
         if block.arity == 1
           yield processor
         else
@@ -1327,7 +1390,7 @@ module Extensions
       else
         processor, name, config = resolve_args args, 3
         # style 2: specified as Class or String class name
-        if (processor_class = Extensions.resolve_class processor)
+        if (processor_class = Helpers.resolve_class processor)
           unless processor_class < kind_class || (kind_java_class && processor_class < kind_java_class)
             raise ::ArgumentError, %(Class specified for #{kind_name} extension does not inherit from #{kind_class}: #{processor})
           end
@@ -1385,7 +1448,7 @@ module Extensions
 
     def create name = nil, &block
       if block_given?
-        Registry.new({ (name || generate_name) => block })
+        Registry.new (name || generate_name) => block
       else
         Registry.new
       end
@@ -1433,7 +1496,7 @@ module Extensions
         resolved_group = block
       elsif (group = args.pop)
         # QUESTION should we instantiate the group class here or defer until activation??
-        resolved_group = (resolve_class group) || group
+        resolved_group = (Helpers.resolve_class group) || group
       else
         raise ::ArgumentError, %(Extension group to register not specified)
       end
@@ -1461,36 +1524,6 @@ module Extensions
       names.each {|group| @groups.delete group.to_sym }
       nil
     end
-
-    # Internal: Resolve the specified object as a Class
-    #
-    # object - The object to resolve as a Class
-    #
-    # Returns a Class if the specified object is a Class (but not a Module) or
-    # a String that resolves to a Class; otherwise, nil
-    def resolve_class object
-      case object
-      when ::Class
-        object
-      when ::String
-        class_for_name object
-      end
-    end
-
-    # Public: Resolves the Class object for the qualified name.
-    #
-    # Returns Class
-    def class_for_name qualified_name
-      resolved = ::Object
-      (qualified_name.split '::').each do |name|
-        unless name.empty? || ((resolved.const_defined? name) && ::Module === (resolved = resolved.const_get name))
-          raise ::NameError, %(Could not resolve class for name: #{qualified_name})
-        end
-      end
-      raise ::NameError, %(Could not resolve class for name: #{qualified_name}) unless ::Class === resolved
-      resolved
-    end
   end
-
 end
 end

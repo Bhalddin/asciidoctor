@@ -1,11 +1,7 @@
-# encoding: UTF-8
-unless defined? ASCIIDOCTOR_PROJECT_DIR
-  $: << File.dirname(__FILE__); $:.uniq!
-  require 'test_helper'
-end
+require_relative 'test_helper'
 
 class ReaderTest < Minitest::Test
-  DIRNAME = File.expand_path(File.dirname(__FILE__))
+  DIRNAME = ASCIIDOCTOR_TEST_DIR
 
   SAMPLE_DATA = <<-EOS.chomp.split(::Asciidoctor::LF)
 first line
@@ -26,46 +22,67 @@ third line
       end
 
       test 'should remove UTF-8 BOM from first line of String data' do
-        data = "\xef\xbb\xbf#{SAMPLE_DATA.join ::Asciidoctor::LF}"
-        reader = Asciidoctor::Reader.new data, nil, :normalize => true
-        assert_equal 'f', reader.lines.first.chr
-        assert_equal SAMPLE_DATA, reader.lines
+        ['UTF-8', 'ASCII-8BIT'].each do |start_encoding|
+          data = "\xef\xbb\xbf#{SAMPLE_DATA.join ::Asciidoctor::LF}".force_encoding start_encoding
+          reader = Asciidoctor::Reader.new data, nil, normalize: true
+          assert_equal Encoding::UTF_8, reader.lines[0].encoding
+          assert_equal 'f', reader.lines[0].chr
+          assert_equal SAMPLE_DATA, reader.lines
+        end
       end
 
       test 'should remove UTF-8 BOM from first line of Array data' do
-        data = SAMPLE_DATA.dup
-        data[0] = "\xef\xbb\xbf#{data.first}"
-        reader = Asciidoctor::Reader.new data, nil, :normalize => true
-        assert_equal 'f', reader.lines.first.chr
-        assert_equal SAMPLE_DATA, reader.lines
+        ['UTF-8', 'ASCII-8BIT'].each do |start_encoding|
+          data = SAMPLE_DATA.dup
+          data[0] = "\xef\xbb\xbf#{data.first}".force_encoding start_encoding
+          reader = Asciidoctor::Reader.new data, nil, normalize: true
+          assert_equal Encoding::UTF_8, reader.lines[0].encoding
+          assert_equal 'f', reader.lines[0].chr
+          assert_equal SAMPLE_DATA, reader.lines
+        end
       end
 
-      if Asciidoctor::COERCE_ENCODING
-        test 'should encode UTF-16LE string to UTF-8 when BOM is found' do
-          data = "\ufeff#{SAMPLE_DATA.join ::Asciidoctor::LF}".encode('UTF-16LE').force_encoding('UTF-8')
-          reader = Asciidoctor::Reader.new data, nil, :normalize => true
-          assert_equal 'f', reader.lines.first.chr
+      test 'should encode UTF-16LE string to UTF-8 when BOM is found' do
+        ['UTF-8', 'ASCII-8BIT'].each do |start_encoding|
+          data = "\ufeff#{SAMPLE_DATA.join ::Asciidoctor::LF}".encode('UTF-16LE').force_encoding(start_encoding)
+          reader = Asciidoctor::Reader.new data, nil, normalize: true
+          assert_equal Encoding::UTF_8, reader.lines[0].encoding
+          assert_equal 'f', reader.lines[0].chr
           assert_equal SAMPLE_DATA, reader.lines
         end
+      end
 
-        test 'should encode UTF-16LE string array to UTF-8 when BOM is found' do
-          data = "\ufeff#{SAMPLE_DATA.join ::Asciidoctor::LF}".encode('UTF-16LE').force_encoding('UTF-8').lines.to_a
-          reader = Asciidoctor::Reader.new data, nil, :normalize => true
-          assert_equal 'f', reader.lines.first.chr
+      test 'should encode UTF-16LE string array to UTF-8 when BOM is found' do
+        ['UTF-8', 'ASCII-8BIT'].each do |start_encoding|
+          # NOTE can't split a UTF-16LE string using .lines when encoding is set to UTF-8
+          data = SAMPLE_DATA.dup
+          data.unshift %(\ufeff#{data.shift})
+          data.each {|line| (line.encode 'UTF-16LE').force_encoding start_encoding }
+          reader = Asciidoctor::Reader.new data, nil, normalize: true
+          assert_equal Encoding::UTF_8, reader.lines[0].encoding
+          assert_equal 'f', reader.lines[0].chr
           assert_equal SAMPLE_DATA, reader.lines
         end
+      end
 
-        test 'should encode UTF-16BE string to UTF-8 when BOM is found' do
-          data = "\ufeff#{SAMPLE_DATA.join ::Asciidoctor::LF}".encode('UTF-16BE').force_encoding('UTF-8')
-          reader = Asciidoctor::Reader.new data, nil, :normalize => true
-          assert_equal 'f', reader.lines.first.chr
+      test 'should encode UTF-16BE string to UTF-8 when BOM is found' do
+        ['UTF-8', 'ASCII-8BIT'].each do |start_encoding|
+          data = "\ufeff#{SAMPLE_DATA.join ::Asciidoctor::LF}".encode('UTF-16BE').force_encoding(start_encoding)
+          reader = Asciidoctor::Reader.new data, nil, normalize: true
+          assert_equal Encoding::UTF_8, reader.lines[0].encoding
+          assert_equal 'f', reader.lines[0].chr
           assert_equal SAMPLE_DATA, reader.lines
         end
+      end
 
-        test 'should encode UTF-16BE string array to UTF-8 when BOM is found' do
-          data = "\ufeff#{SAMPLE_DATA.join ::Asciidoctor::LF}".encode('UTF-16BE').force_encoding('UTF-8').lines.to_a
-          reader = Asciidoctor::Reader.new data, nil, :normalize => true
-          assert_equal 'f', reader.lines.first.chr
+      test 'should encode UTF-16BE string array to UTF-8 when BOM is found' do
+        ['UTF-8', 'ASCII-8BIT'].each do |start_encoding|
+          data = SAMPLE_DATA.dup
+          data.unshift %(\ufeff#{data.shift})
+          data = data.map {|line| (line.encode 'UTF-16BE').force_encoding start_encoding }
+          reader = Asciidoctor::Reader.new data, nil, normalize: true
+          assert_equal Encoding::UTF_8, reader.lines[0].encoding
+          assert_equal 'f', reader.lines[0].chr
           assert_equal SAMPLE_DATA, reader.lines
         end
       end
@@ -206,7 +223,7 @@ third line
       end
 
       test 'unshift puts line onto Reader as next line to read' do
-        reader = Asciidoctor::Reader.new SAMPLE_DATA, nil, :normalize => true
+        reader = Asciidoctor::Reader.new SAMPLE_DATA, nil, normalize: true
         reader.unshift 'line zero'
         assert_equal 'line zero', reader.peek_line
         assert_equal 'line zero', reader.read_line
@@ -257,25 +274,25 @@ third line
         reader = Asciidoctor::Reader.new SAMPLE_DATA, 'sample.adoc'
         reader.read_line
         assert_equal 'sample.adoc: line 2', reader.line_info
-        assert_equal 'sample.adoc: line 2', reader.next_line_info
+        assert_equal 'sample.adoc: line 2', reader.cursor.to_s
       end
 
-      test 'prev_line_info should return file name and line number of previous line read' do
+      test 'cursor_at_prev_line should return file name and line number of previous line read' do
         reader = Asciidoctor::Reader.new SAMPLE_DATA, 'sample.adoc'
         reader.read_line
-        assert_equal 'sample.adoc: line 1', reader.prev_line_info
+        assert_equal 'sample.adoc: line 1', reader.cursor_at_prev_line.to_s
       end
     end
 
     context 'Read lines until' do
       test 'Read lines until until end' do
-        lines = <<-EOS.lines.entries
+        lines = <<-EOS.lines
 This is one paragraph.
 
 This is another paragraph.
         EOS
 
-        reader = Asciidoctor::Reader.new lines, nil, :normalize => true
+        reader = Asciidoctor::Reader.new lines, nil, normalize: true
         result = reader.read_lines_until
         assert_equal 3, result.size
         assert_equal lines.map {|l| l.chomp }, result
@@ -284,14 +301,14 @@ This is another paragraph.
       end
 
       test 'Read lines until until blank line' do
-        lines = <<-EOS.lines.entries
+        lines = <<-EOS.lines
 This is one paragraph.
 
 This is another paragraph.
         EOS
 
-        reader = Asciidoctor::Reader.new lines, nil, :normalize => true
-        result = reader.read_lines_until :break_on_blank_lines => true
+        reader = Asciidoctor::Reader.new lines, nil, normalize: true
+        result = reader.read_lines_until break_on_blank_lines: true
         assert_equal 1, result.size
         assert_equal lines.first.chomp, result.first
         assert_equal lines.last.chomp, reader.peek_line
@@ -305,7 +322,7 @@ This is another paragraph.
         EOS
 
         reader = Asciidoctor::Reader.new lines
-        result = reader.read_lines_until :break_on_blank_lines => true, :preserve_last_line => true
+        result = reader.read_lines_until break_on_blank_lines: true, preserve_last_line: true
         assert_equal 1, result.size
         assert_equal lines.first.chomp, result.first
         assert reader.next_line_empty?
@@ -343,7 +360,7 @@ This is a paragraph outside the block.
 
         reader = Asciidoctor::Reader.new lines
         reader.read_line
-        result = reader.read_lines_until(:read_last_line => true) {|line| line == '--' }
+        result = reader.read_lines_until(read_last_line: true) {|line| line == '--' }
         assert_equal 4, result.size
         assert_equal lines[1, 4], result
         assert reader.next_line_empty?
@@ -362,10 +379,54 @@ This is a paragraph outside the block.
 
         reader = Asciidoctor::Reader.new lines
         reader.read_line
-        result = reader.read_lines_until(:read_last_line => true, :preserve_last_line => true) {|line| line == '--' }
+        result = reader.read_lines_until(read_last_line: true, preserve_last_line: true) {|line| line == '--' }
         assert_equal 4, result.size
         assert_equal lines[1, 4], result
         assert_equal '--', reader.peek_line
+      end
+
+      test 'read lines until terminator' do
+        lines = <<-EOS.lines
+****
+captured
+
+also captured
+****
+
+not captured
+        EOS
+
+        expected = ['captured', '', 'also captured']
+
+        doc = empty_safe_document base_dir: DIRNAME
+        reader = Asciidoctor::PreprocessorReader.new doc, lines, nil, normalize: true
+        terminator = reader.read_line
+        result = reader.read_lines_until terminator: terminator, skip_processing: true
+        assert_equal expected, result
+        refute reader.unterminated
+      end
+
+      test 'should flag reader as unterminated if reader reaches end of source without finding terminator' do
+        lines = <<-EOS.lines
+****
+captured
+
+also captured
+
+captured yet again
+        EOS
+
+        expected = lines[1..-1].map {|l| l.chomp }
+
+        using_memory_logger do |logger|
+          doc = empty_safe_document base_dir: DIRNAME
+          reader = Asciidoctor::PreprocessorReader.new doc, lines, nil, normalize: true
+          terminator = reader.peek_line
+          result = reader.read_lines_until terminator: terminator, skip_first_line: true, skip_processing: true
+          assert_equal expected, result
+          assert reader.unterminated
+          assert_message logger, :WARN, '<stdin>: line 1: unterminated **** block', Hash
+        end
       end
     end
   end
@@ -410,10 +471,10 @@ This is a paragraph outside the block.
 source\r
 with\r
 CRLF\r
-endlines\r
+line endings\r
       EOS
 
-        [input, input.lines.to_a, input.split(::Asciidoctor::LF), input.split(::Asciidoctor::LF).join(::Asciidoctor::LF)].each do |lines|
+        [input, input.lines, input.split(::Asciidoctor::LF), input.split(::Asciidoctor::LF).join(::Asciidoctor::LF)].each do |lines|
           doc = Asciidoctor::Document.new lines
           reader = doc.reader
           reader.lines.each do |line|
@@ -459,7 +520,7 @@ Author Name
 preamble
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => {'skip-front-matter' => ''}
+        doc = Asciidoctor::Document.new input, attributes: { 'skip-front-matter' => '' }
         reader = doc.reader
         assert_equal '= Document Title', reader.peek_line
         assert_equal front_matter, doc.attributes['front-matter']
@@ -495,39 +556,90 @@ preamble
         assert_nil reader.file
         assert_equal '<stdin>', reader.path
       end
+
+      test 'PreprocessorReader#push_include method should set path from file automatically if not specified' do
+        lines = %w(a b c)
+        doc = Asciidoctor::Document.new lines
+        reader = doc.reader
+        append_lines = %w(one two three)
+        reader.push_include append_lines, '/tmp/lines.adoc'
+        assert_equal '/tmp/lines.adoc', reader.file
+        assert_equal 'lines.adoc', reader.path
+      end
+
+      test 'PreprocessorReader#push_include method should accept file as a URI and compute dir and path' do
+        file_uri = ::URI.parse 'http://example.com/docs/file.adoc'
+        dir_uri = ::URI.parse 'http://example.com/docs'
+        reader = empty_document.reader
+        reader.push_include %w(one two three), file_uri
+        assert_same file_uri, reader.file
+        assert_equal dir_uri, reader.dir
+        assert_equal 'file.adoc', reader.path
+      end
+
+      test 'PreprocessorReader#push_include method should accept file as a top-level URI and compute dir and path' do
+        file_uri = ::URI.parse 'http://example.com/index.adoc'
+        dir_uri = ::URI.parse 'http://example.com'
+        reader = empty_document.reader
+        reader.push_include %w(one two three), file_uri
+        assert_same file_uri, reader.file
+        assert_equal dir_uri, reader.dir
+        assert_equal 'index.adoc', reader.path
+      end
+
+      test 'PreprocessorReader#push_include method should not fail if data is nil' do
+        lines = %w(a b c)
+        doc = Asciidoctor::Document.new lines
+        reader = doc.reader
+        reader.push_include nil, '', '<stdin>'
+        assert_equal 0, reader.include_stack.size
+        assert_equal 'a', reader.read_line.rstrip
+      end
     end
 
     context 'Include Directive' do
       test 'include directive is disabled by default and becomes a link' do
         input = <<-EOS
-include::include-file.asciidoc[]
+include::include-file.adoc[]
         EOS
         doc = Asciidoctor::Document.new input
         reader = doc.reader
-        assert_equal 'link:include-file.asciidoc[]', reader.read_line
+        assert_equal 'link:include-file.adoc[]', reader.read_line
       end
 
       test 'include directive is enabled when safe mode is less than SECURE' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[]
+include::fixtures/include-file.adoc[]
         EOS
 
-        doc = document_from_string input, :safe => :safe, :header_footer => false, :base_dir => DIRNAME
-        output = doc.render
+        doc = document_from_string input, safe: :safe, header_footer: false, base_dir: DIRNAME
+        output = doc.convert
         assert_match(/included content/, output)
+        assert doc.catalog[:includes]['fixtures/include-file']
+      end
+
+      test 'should not track include in catalog for non-AsciiDoc include files' do
+        input = <<-EOS
+----
+include::fixtures/circle.svg[]
+----
+        EOS
+
+        doc = document_from_string input, safe: :safe, header_footer: false, base_dir: DIRNAME
+        assert doc.catalog[:includes].empty?
       end
 
       test 'include directive should resolve file with spaces in name' do
         input = <<-EOS
-include::fixtures/include file.asciidoc[]
+include::fixtures/include file.adoc[]
         EOS
 
-        include_file = File.join DIRNAME, 'fixtures', 'include-file.asciidoc'
-        include_file_with_sp = File.join DIRNAME, 'fixtures', 'include file.asciidoc'
+        include_file = File.join DIRNAME, 'fixtures', 'include-file.adoc'
+        include_file_with_sp = File.join DIRNAME, 'fixtures', 'include file.adoc'
         begin
           FileUtils.cp include_file, include_file_with_sp
-          doc = document_from_string input, :safe => :safe, :header_footer => false, :base_dir => DIRNAME
-          output = doc.render
+          doc = document_from_string input, safe: :safe, header_footer: false, base_dir: DIRNAME
+          output = doc.convert
           assert_match(/included content/, output)
         ensure
           FileUtils.rm include_file_with_sp
@@ -536,15 +648,15 @@ include::fixtures/include file.asciidoc[]
 
       test 'include directive should resolve file with {sp} in name' do
         input = <<-EOS
-include::fixtures/include{sp}file.asciidoc[]
+include::fixtures/include{sp}file.adoc[]
         EOS
 
-        include_file = File.join DIRNAME, 'fixtures', 'include-file.asciidoc'
-        include_file_with_sp = File.join DIRNAME, 'fixtures', 'include file.asciidoc'
+        include_file = File.join DIRNAME, 'fixtures', 'include-file.adoc'
+        include_file_with_sp = File.join DIRNAME, 'fixtures', 'include file.adoc'
         begin
           FileUtils.cp include_file, include_file_with_sp
-          doc = document_from_string input, :safe => :safe, :header_footer => false, :base_dir => DIRNAME
-          output = doc.render
+          doc = document_from_string input, safe: :safe, header_footer: false, base_dir: DIRNAME
+          output = doc.convert
           assert_match(/included content/, output)
         ensure
           FileUtils.rm include_file_with_sp
@@ -562,8 +674,8 @@ include::fixtures/parent-include.adoc[]
         child_include_docfile = File.join fixtures_dir, 'child-include.adoc'
         grandchild_include_docfile = File.join fixtures_dir, 'grandchild-include.adoc'
 
-        doc = empty_safe_document :base_dir => DIRNAME
-        reader = Asciidoctor::PreprocessorReader.new doc, input, pseudo_docfile, :normalize => true
+        doc = empty_safe_document base_dir: DIRNAME
+        reader = Asciidoctor::PreprocessorReader.new doc, input, pseudo_docfile, normalize: true
 
         assert_equal pseudo_docfile, reader.file
         assert_equal DIRNAME, reader.dir
@@ -571,7 +683,7 @@ include::fixtures/parent-include.adoc[]
 
         assert_equal 'first line of parent', reader.read_line
 
-        assert_equal 'fixtures/parent-include.adoc: line 1', reader.prev_line_info
+        assert_equal 'fixtures/parent-include.adoc: line 1', reader.cursor_at_prev_line.to_s
         assert_equal parent_include_docfile, reader.file
         assert_equal fixtures_dir, reader.dir
         assert_equal 'fixtures/parent-include.adoc', reader.path
@@ -580,7 +692,7 @@ include::fixtures/parent-include.adoc[]
 
         assert_equal 'first line of child', reader.read_line
 
-        assert_equal 'fixtures/child-include.adoc: line 1', reader.prev_line_info
+        assert_equal 'fixtures/child-include.adoc: line 1', reader.cursor_at_prev_line.to_s
         assert_equal child_include_docfile, reader.file
         assert_equal fixtures_dir, reader.dir
         assert_equal 'fixtures/child-include.adoc', reader.path
@@ -589,7 +701,7 @@ include::fixtures/parent-include.adoc[]
 
         assert_equal 'first line of grandchild', reader.read_line
 
-        assert_equal 'fixtures/grandchild-include.adoc: line 1', reader.prev_line_info
+        assert_equal 'fixtures/grandchild-include.adoc: line 1', reader.cursor_at_prev_line.to_s
         assert_equal grandchild_include_docfile, reader.file
         assert_equal fixtures_dir, reader.dir
         assert_equal 'fixtures/grandchild-include.adoc', reader.path
@@ -606,10 +718,22 @@ include::fixtures/parent-include.adoc[]
 
         assert_equal 'last line of parent', reader.read_line
 
-        assert_equal 'fixtures/parent-include.adoc: line 5', reader.prev_line_info
+        assert_equal 'fixtures/parent-include.adoc: line 5', reader.cursor_at_prev_line.to_s
         assert_equal parent_include_docfile, reader.file
         assert_equal fixtures_dir, reader.dir
         assert_equal 'fixtures/parent-include.adoc', reader.path
+      end
+
+      test 'include directive should process lines when file extension of target is .asciidoc' do
+        input = <<-EOS
+include::fixtures/include-alt-extension.asciidoc[]
+        EOS
+
+        doc = document_from_string input, safe: :safe, base_dir: DIRNAME
+        assert_equal 3, doc.blocks.size
+        assert_equal ['first line'], doc.blocks[0].lines
+        assert_equal ['Asciidoctor!'], doc.blocks[1].lines
+        assert_equal ['last line'], doc.blocks[2].lines
       end
 
       test 'missing file referenced by include directive is skipped when optional option is set' do
@@ -620,12 +744,12 @@ trailing content
         EOS
 
         begin
-          doc, warnings = redirect_streams do |_, err|
-            [(document_from_string input, :safe => :safe, :base_dir => DIRNAME), err.string]
+          using_memory_logger do |logger|
+            doc = document_from_string input, safe: :safe, base_dir: DIRNAME
+            assert_equal 1, doc.blocks.size
+            assert_equal ['trailing content'], doc.blocks[0].lines
+            assert logger.empty?
           end
-          assert_equal 1, doc.blocks.size
-          assert_equal ['trailing content'], doc.blocks[0].lines
-          assert_equal 0, warnings.size
         rescue
           flunk 'include directive should not raise exception on missing file'
         end
@@ -639,13 +763,13 @@ trailing content
         EOS
 
         begin
-          doc, warnings = redirect_streams do |_, err|
-            [(document_from_string input, :safe => :safe, :base_dir => DIRNAME), err.string]
+          using_memory_logger do |logger|
+            doc = document_from_string input, safe: :safe, base_dir: DIRNAME
+            assert_equal 2, doc.blocks.size
+            assert_equal ['Unresolved directive in <stdin> - include::fixtures/no-such-file.adoc[]'], doc.blocks[0].lines
+            assert_equal ['trailing content'], doc.blocks[1].lines
+            assert_message logger, :ERROR, '~<stdin>: line 1: include file not found', Hash
           end
-          assert_equal 2, doc.blocks.size
-          assert_equal ['Unresolved directive in <stdin> - include::fixtures/no-such-file.adoc[]'], doc.blocks[0].lines
-          assert_equal ['trailing content'], doc.blocks[1].lines
-          assert_includes warnings, 'include file not found'
         rescue
           flunk 'include directive should not raise exception on missing file'
         end
@@ -661,13 +785,13 @@ trailing content
         EOS
 
         begin
-          doc, warnings = redirect_streams do |_, err|
-            [(document_from_string input, :safe => :safe, :base_dir => DIRNAME), err.string]
+          using_memory_logger do |logger|
+            doc = document_from_string input, safe: :safe, base_dir: DIRNAME
+            assert_equal 2, doc.blocks.size
+            assert_equal ['Unresolved directive in <stdin> - include::fixtures/chapter-a.adoc[]'], doc.blocks[0].lines
+            assert_equal ['trailing content'], doc.blocks[1].lines
+            assert_message logger, :ERROR, '~<stdin>: line 1: include file not readable', Hash
           end
-          assert_equal 2, doc.blocks.size
-          assert_equal ['Unresolved directive in <stdin> - include::fixtures/chapter-a.adoc[]'], doc.blocks[0].lines
-          assert_equal ['trailing content'], doc.blocks[1].lines
-          assert_includes warnings, 'include file not readable'
         rescue
           flunk 'include directive should not raise exception on missing file'
         ensure
@@ -681,15 +805,14 @@ trailing content
         input = <<-EOS
 include::#{include_path}[]
         EOS
-        result = document_from_string input, :safe => :safe
+        result = document_from_string input, safe: :safe
         assert_equal 'Chapter A', result.doctitle
 
-        result = document_from_string input, :safe => :unsafe, :base_dir => ::Dir.tmpdir
+        result = document_from_string input, safe: :unsafe, base_dir: ::Dir.tmpdir
         assert_equal 'Chapter A', result.doctitle
       end
 
       test 'include directive can retrieve data from uri' do
-        #url = 'http://echo.jsontest.com/name/asciidoctor'
         url = %(http://#{resolve_localhost}:9876/name/asciidoctor)
         input = <<-EOS
 ....
@@ -698,11 +821,97 @@ include::#{url}[]
         EOS
         expect = /\{"name": "asciidoctor"\}/
         output = using_test_webserver do
-          render_embedded_string input, :safe => :safe, :attributes => {'allow-uri-read' => ''}
+          convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
         end
 
         refute_nil output
         assert_match(expect, output)
+      end
+
+      test 'nested include directives are resolved relative to current file' do
+        input = <<-EOS
+....
+include::fixtures/outer-include.adoc[]
+....
+        EOS
+
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+        expected = 'first line of outer
+
+first line of middle
+
+first line of inner
+
+last line of inner
+
+last line of middle
+
+last line of outer'
+        assert_includes output, expected
+      end
+
+      test 'nested remote include directive is resolved relative to uri of current file' do
+        url = %(http://#{resolve_localhost}:9876/fixtures/outer-include.adoc)
+        input = <<-EOS
+....
+include::#{url}[]
+....
+        EOS
+        output = using_test_webserver do
+          convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+        end
+
+        expected = 'first line of outer
+
+first line of middle
+
+first line of inner
+
+last line of inner
+
+last line of middle
+
+last line of outer'
+        assert_includes output, expected
+      end
+
+      test 'nested remote include directive that cannot be resolved does not crash processor' do
+        include_url = %(http://#{resolve_localhost}:9876/fixtures/file-with-missing-include.adoc)
+        nested_include_url = 'no-such-file.adoc'
+        input = <<-EOS
+....
+include::#{include_url}[]
+....
+        EOS
+        begin
+          using_memory_logger do |logger|
+            result = using_test_webserver do
+              convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+            end
+            assert_includes result, %(Unresolved directive in #{include_url} - include::#{nested_include_url}[])
+            assert_message logger, :ERROR, %(#{include_url}: line 1: include uri not readable: http://#{resolve_localhost}:9876/fixtures/#{nested_include_url}), Hash
+          end
+        rescue
+          flunk 'include directive should not raise exception on missing file'
+        end
+      end
+
+      test 'tag filtering is supported for remote includes' do
+        url = %(http://#{resolve_localhost}:9876/fixtures/tagged-class.rb)
+        input = <<-EOS
+[source,ruby]
+----
+include::#{url}[tag=init,indent=0]
+----
+        EOS
+        output = using_test_webserver do
+          convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+        end
+
+        expected = '<code class="language-ruby" data-lang="ruby">def initialize breed
+  @breed = breed
+end</code>'
+        assert_includes output, expected
       end
 
       test 'inaccessible uri referenced by include directive does not crash processor' do
@@ -714,27 +923,25 @@ include::#{url}[]
         EOS
 
         begin
-          output = warnings = nil
-          redirect_streams do |_, err|
+          using_memory_logger do |logger|
             output = using_test_webserver do
-              render_embedded_string input, :safe => :safe, :attributes => {'allow-uri-read' => ''}
+              convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
             end
-            warnings = err.string
+            refute_nil output
+            assert_match(/Unresolved directive/, output)
+            assert_message logger, :ERROR, %(<stdin>: line 2: include uri not readable: #{url}), Hash
           end
-          refute_nil output
-          assert_match(/Unresolved directive/, output)
-          assert_includes warnings, 'include uri not readable'
         rescue
           flunk 'include directive should not raise exception on inaccessible uri'
         end
       end
 
-      test 'include directive supports line selection' do
+      test 'include directive supports selecting lines by line number' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[lines=1;3..4;6..-1]
+include::fixtures/include-file.adoc[lines=1;3..4;6..-1]
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         assert_match(/first line/, output)
         refute_match(/second line/, output)
         assert_match(/third line/, output)
@@ -746,16 +953,33 @@ include::fixtures/include-file.asciidoc[lines=1;3..4;6..-1]
         assert_match(/last line of included content/, output)
       end
 
-      test 'include directive supports line selection using quoted attribute value' do
+      test 'include directive supports line ranges specified in quoted attribute value' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[lines="1, 3..4 , 6 .. -1"]
+include::fixtures/include-file.adoc[lines="1, 3..4 , 6 .. -1"]
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         assert_match(/first line/, output)
         refute_match(/second line/, output)
         assert_match(/third line/, output)
         assert_match(/fourth line/, output)
+        refute_match(/fifth line/, output)
+        assert_match(/sixth line/, output)
+        assert_match(/seventh line/, output)
+        assert_match(/eighth line/, output)
+        assert_match(/last line of included content/, output)
+      end
+
+      test 'include directive supports implicit endless range' do
+        input = <<-EOS
+include::fixtures/include-file.adoc[lines=6..]
+        EOS
+
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+        refute_match(/first line/, output)
+        refute_match(/second line/, output)
+        refute_match(/third line/, output)
+        refute_match(/fourth line/, output)
         refute_match(/fifth line/, output)
         assert_match(/sixth line/, output)
         assert_match(/seventh line/, output)
@@ -766,64 +990,102 @@ include::fixtures/include-file.asciidoc[lines="1, 3..4 , 6 .. -1"]
       test 'include directive ignores empty lines attribute' do
         input = <<-EOS
 ++++
-include::fixtures/include-file.asciidoc[lines=]
+include::fixtures/include-file.adoc[lines=]
 ++++
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         assert_includes output, 'first line of included content'
         assert_includes output, 'last line of included content'
       end
 
-      test 'include directive supports tagged selection' do
+      test 'include directive supports selecting lines by tag' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[tag=snippetA]
+include::fixtures/include-file.adoc[tag=snippetA]
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         assert_match(/snippetA content/, output)
         refute_match(/snippetB content/, output)
         refute_match(/non-tagged content/, output)
         refute_match(/included content/, output)
       end
 
-      test 'include directive supports multiple tagged selection' do
+      test 'include directive supports selecting lines by tags' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[tags=snippetA;snippetB]
+include::fixtures/include-file.adoc[tags=snippetA;snippetB]
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         assert_match(/snippetA content/, output)
         assert_match(/snippetB content/, output)
         refute_match(/non-tagged content/, output)
         refute_match(/included content/, output)
       end
 
-      test 'include directive supports tagged selection in language that uses circumfix comments' do
+      test 'include directive supports selecting lines by tag in language that uses circumfix comments' do
         {
           'include-file.xml' => '<snippet>content</snippet>',
-          'include-file.ml' => 'let s = SS.empty;;'
+          'include-file.ml' => 'let s = SS.empty;;',
+          'include-file.jsx' => '<p>Welcome to the club.</p>',
         }.each do |filename, expect|
           input = <<-EOS
-[source,xml,indent=0]
+[source,xml]
 ----
-include::fixtures/#{filename}[tag=snippet]
+include::fixtures/#{filename}[tag=snippet,indent=0]
 ----
           EOS
 
-          doc = document_from_string input, :safe => :safe, :base_dir => DIRNAME
+          doc = document_from_string input, safe: :safe, base_dir: DIRNAME
           assert_equal expect, doc.blocks[0].source
         end
       end
 
-      test 'include directive does not select lines with tag directives inside tagged selection' do
+      test 'include directive supports selecting tagged lines in file that has CRLF line endings' do
+        begin
+          tmp_include = Tempfile.new %w(include- .adoc)
+          tmp_include_dir, tmp_include_path = File.split tmp_include.path
+          tmp_include.write %(do not include\r\ntag::include-me[]\r\nincluded line\r\nend::include-me[]\r\ndo not include\r\n)
+          tmp_include.close
+          input = <<-EOS
+include::#{tmp_include_path}[tag=include-me]
+          EOS
+          output = convert_string_to_embedded input, safe: :safe, base_dir: tmp_include_dir
+          assert_includes output, 'included line'
+          refute_includes output, 'do not include'
+        ensure
+          tmp_include.close!
+        end
+      end
+
+      test 'include directive finds closing tag on last line of file without a trailing newline' do
+        begin
+          tmp_include = Tempfile.new %w(include- .adoc)
+          tmp_include_dir, tmp_include_path = File.split tmp_include.path
+          tmp_include.write %(line not included\ntag::include-me[]\nline included\nend::include-me[])
+          tmp_include.close
+          input = <<-EOS
+include::#{tmp_include_path}[tag=include-me]
+          EOS
+          using_memory_logger do |logger|
+            output = convert_string_to_embedded input, safe: :safe, base_dir: tmp_include_dir
+            assert_empty logger.messages
+            assert_includes output, 'line included'
+            refute_includes output, 'line not included'
+          end
+        ensure
+          tmp_include.close!
+        end
+      end
+
+      test 'include directive does not select lines with tag directives within selected tag region' do
         input = <<-EOS
 ++++
-include::fixtures/include-file.asciidoc[tags=snippet]
+include::fixtures/include-file.adoc[tags=snippet]
 ++++
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expect = %(snippetA content
 
 non-tagged content
@@ -839,7 +1101,7 @@ include::fixtures/tagged-class-enclosed.rb[tags=all;!bark]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(class Dog
   def initialize breed
     @breed = breed
@@ -855,7 +1117,7 @@ include::fixtures/tagged-class.rb[tags=**]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(class Dog
   def initialize breed
     @breed = breed
@@ -879,7 +1141,7 @@ include::fixtures/tagged-class.rb[tags=**;!bark]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(class Dog
   def initialize breed
     @breed = breed
@@ -895,7 +1157,7 @@ include::fixtures/tagged-class-enclosed.rb[tags=*]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(class Dog
   def initialize breed
     @breed = breed
@@ -919,7 +1181,7 @@ include::fixtures/tagged-class-enclosed.rb[tags=*;!init]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(class Dog
 
   def bark
@@ -940,7 +1202,7 @@ include::fixtures/tagged-class.rb[tags=!*]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(class Dog
 end)
         assert_includes output, expected
@@ -954,7 +1216,7 @@ include::fixtures/tagged-class.rb[tags=bark;!bark-other]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         expected = %(def bark
   if @breed == 'beagle'
     'woof woof woof woof woof'
@@ -963,20 +1225,43 @@ end)
         assert_includes output, expected
       end
 
-      test 'should warn if tag is not found in include file' do
+      test 'should warn if specified tag is not found in include file' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[tag=snippetZ]
+include::fixtures/include-file.adoc[tag=no-such-tag]
         EOS
 
-        old_stderr = $stderr
-        $stderr = StringIO.new
-        begin
-          render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
-          warning = $stderr.tap(&:rewind).read
-          refute_nil warning
-          assert_match(/WARNING.*snippetZ/, warning)
-        ensure
-          $stderr = old_stderr
+        using_memory_logger do |logger|
+          convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          assert_message logger, :WARN, %(~<stdin>: line 1: tag 'no-such-tag' not found in include file), Hash
+        end
+      end
+
+      test 'should warn if specified tags are not found in include file' do
+        input = <<-EOS
+++++
+include::fixtures/include-file.adoc[tags=no-such-tag-b;no-such-tag-a]
+++++
+        EOS
+
+        using_memory_logger do |logger|
+          convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          expected_tags = 'no-such-tag-b, no-such-tag-a'
+          assert_message logger, :WARN, %(~<stdin>: line 2: tags '#{expected_tags}' not found in include file), Hash
+        end
+      end
+
+      test 'should warn if specified tag in include file is not closed' do
+        input = <<-EOS
+++++
+include::fixtures/unclosed-tag.adoc[tag=a]
+++++
+        EOS
+
+        using_memory_logger do |logger|
+          result = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          assert_equal 'a', result
+          assert_message logger, :WARN, %(~<stdin>: line 2: detected unclosed tag 'a' starting at line 2 of include file), Hash
+          refute_nil logger.messages[0][:message][:include_location]
         end
       end
 
@@ -987,12 +1272,29 @@ include::fixtures/mismatched-end-tag.adoc[tags=a;b]
 ++++
         EOS
 
-        result, warnings = redirect_streams do |out, err|
-          [(render_embedded_string input, :safe => :safe, :base_dir => DIRNAME), err.string]
+        inc_path = File.join DIRNAME, 'fixtures/mismatched-end-tag.adoc'
+        using_memory_logger do |logger|
+          result = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          assert_equal %(a\nb), result
+          assert_message logger, :WARN, %(<stdin>: line 2: mismatched end tag (expected 'b' but found 'a') at line 5 of include file: #{inc_path}), Hash
+          refute_nil logger.messages[0][:message][:include_location]
         end
-        assert_equal %(a\nb), result
-        refute_nil warnings
-        assert_match(/WARNING: .*end tag/, warnings)
+      end
+
+      test 'should warn if unexpected end tag is found in included file' do
+        input = <<-EOS
+++++
+include::fixtures/unexpected-end-tag.adoc[tags=a]
+++++
+        EOS
+
+        inc_path = File.join DIRNAME, 'fixtures/unexpected-end-tag.adoc'
+        using_memory_logger do |logger|
+          result = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          assert_equal 'a', result
+          assert_message logger, :WARN, %(<stdin>: line 2: unexpected end tag 'a' at line 4 of include file: #{inc_path}), Hash
+          refute_nil logger.messages[0][:message][:include_location]
+        end
       end
 
       test 'include directive ignores tags attribute when empty' do
@@ -1003,17 +1305,17 @@ include::fixtures/include-file.xml[#{attr_name}=]
 ++++
           EOS
 
-          output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+          output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
           assert_match(/(?:tag|end)::/, output, 2)
         end
       end
 
       test 'lines attribute takes precedence over tags attribute in include directive' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[lines=1, tags=snippetA;snippetB]
+include::fixtures/include-file.adoc[lines=1, tags=snippetA;snippetB]
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         assert_match(/first line of included content/, output)
         refute_match(/snippetA content/, output)
         refute_match(/snippetB content/, output)
@@ -1027,14 +1329,27 @@ include::fixtures/basic-docinfo.xml[lines=2..3, indent=0]
 ----
         EOS
 
-        output = render_embedded_string input, :safe => :safe, :base_dir => DIRNAME
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
         result = xmlnodes_at_xpath('//pre', output, 1).text
         assert_equal "<year>2013</year>\n<holder>Acme™, Inc.</holder>", result
       end
 
+      test 'should substitute attribute references in attrlist' do
+        input = <<-EOS
+:name-of-tag: snippetA
+include::fixtures/include-file.adoc[tag={name-of-tag}]
+        EOS
+
+        output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+        assert_match(/snippetA content/, output)
+        refute_match(/snippetB content/, output)
+        refute_match(/non-tagged content/, output)
+        refute_match(/included content/, output)
+      end
+
       test 'should fall back to built-in include directive behavior when not handled by include processor' do
         input = <<-EOS
-include::fixtures/include-file.asciidoc[]
+include::fixtures/include-file.adoc[]
         EOS
 
         include_processor = Class.new {
@@ -1050,8 +1365,8 @@ include::fixtures/include-file.asciidoc[]
           end
         }
 
-        document = empty_safe_document :base_dir => DIRNAME
-        reader = Asciidoctor::PreprocessorReader.new document, input, nil, :normalize => true
+        document = empty_safe_document base_dir: DIRNAME
+        reader = Asciidoctor::PreprocessorReader.new document, input, nil, normalize: true
         reader.instance_variable_set '@include_processors', [include_processor.new(document)]
         lines = reader.read_lines
         source = lines * ::Asciidoctor::LF
@@ -1077,110 +1392,110 @@ content
 :leveloffset!:
         EOS
 
-        document = Asciidoctor.load input, :safe => :safe, :base_dir => DIRNAME, :parse => false
+        document = Asciidoctor.load input, safe: :safe, base_dir: DIRNAME, parse: false
         assert_equal expected, document.reader.read_lines
       end
 
       test 'attributes are substituted in target of include directive' do
         input = <<-EOS
 :fixturesdir: fixtures
-:ext: asciidoc
+:ext: adoc
 
 include::{fixturesdir}/include-file.{ext}[]
         EOS
 
-        doc = document_from_string input, :safe => :safe, :base_dir => DIRNAME
-        output = doc.render
+        doc = document_from_string input, safe: :safe, base_dir: DIRNAME
+        output = doc.convert
         assert_match(/included content/, output)
       end
 
       test 'line is skipped by default if target of include directive resolves to empty' do
         input = <<-EOS
-include::{foodir}/include-file.asciidoc[]
+include::{foodir}/include-file.adoc[]
         EOS
 
-        line, warnings = redirect_streams do |_, err|
-          doc = empty_safe_document :base_dir => DIRNAME
-          reader = Asciidoctor::PreprocessorReader.new doc, input, nil, :normalize => true
-          [reader.read_line, err.string]
+        using_memory_logger do |logger|
+          doc = empty_safe_document base_dir: DIRNAME
+          reader = Asciidoctor::PreprocessorReader.new doc, input, nil, normalize: true
+          line = reader.read_line
+          assert_equal 'Unresolved directive in <stdin> - include::{foodir}/include-file.adoc[]', line
+          assert_message logger, :WARN, 'dropping line containing reference to missing attribute: foodir'
         end
-        assert_equal 'Unresolved directive in <stdin> - include::{foodir}/include-file.asciidoc[]', line
-        assert_includes warnings, 'dropping line containing reference to missing attribute'
       end
 
       test 'line is dropped if target of include directive resolves to empty and attribute-missing attribute is not skip' do
         input = <<-EOS
-include::{foodir}/include-file.asciidoc[]
+include::{foodir}/include-file.adoc[]
         EOS
 
-        line, warnings = redirect_streams do |_, err|
-          doc = empty_safe_document :base_dir => DIRNAME, :attributes => {'attribute-missing' => 'drop'}
-          reader = Asciidoctor::PreprocessorReader.new doc, input, nil, :normalize => true
-          [reader.read_line, err.string]
+        using_memory_logger do |logger|
+          doc = empty_safe_document base_dir: DIRNAME, attributes: { 'attribute-missing' => 'drop' }
+          reader = Asciidoctor::PreprocessorReader.new doc, input, nil, normalize: true
+          line = reader.read_line
+          assert_nil line
+          assert_message logger, :WARN, 'dropping line containing reference to missing attribute: foodir'
         end
-        assert_nil line
-        assert_includes warnings, 'dropping line containing reference to missing attribute'
       end
 
       test 'line following dropped include is not dropped' do
         input = <<-EOS
-include::{foodir}/include-file.asciidoc[]
+include::{foodir}/include-file.adoc[]
 yo
         EOS
 
-        line, warnings = redirect_streams do |_, err|
-          doc = empty_safe_document :base_dir => DIRNAME, :attributes => {'attribute-missing' => 'drop'}
-          reader = Asciidoctor::PreprocessorReader.new doc, input, nil, :normalize => true
-          [reader.read_line, err.string]
+        using_memory_logger do |logger|
+          doc = empty_safe_document base_dir: DIRNAME, attributes: { 'attribute-missing' => 'drop' }
+          reader = Asciidoctor::PreprocessorReader.new doc, input, nil, normalize: true
+          line = reader.read_line
+          assert_equal 'yo', line
+          assert_message logger, :WARN, 'dropping line containing reference to missing attribute: foodir'
         end
-        assert_equal 'yo', line
-        assert_includes warnings, 'dropping line containing reference to missing attribute'
       end
 
       test 'escaped include directive is left unprocessed' do
         input = <<-EOS
-\\include::fixtures/include-file.asciidoc[]
+\\include::fixtures/include-file.adoc[]
 \\escape preserved here
         EOS
-        doc = empty_safe_document :base_dir => DIRNAME
-        reader = Asciidoctor::PreprocessorReader.new doc, input, nil, :normalize => true
+        doc = empty_safe_document base_dir: DIRNAME
+        reader = Asciidoctor::PreprocessorReader.new doc, input, nil, normalize: true
         # we should be able to peek it multiple times and still have the backslash preserved
         # this is the test for @unescape_next_line
-        assert_equal 'include::fixtures/include-file.asciidoc[]', reader.peek_line
-        assert_equal 'include::fixtures/include-file.asciidoc[]', reader.peek_line
-        assert_equal 'include::fixtures/include-file.asciidoc[]', reader.read_line
+        assert_equal 'include::fixtures/include-file.adoc[]', reader.peek_line
+        assert_equal 'include::fixtures/include-file.adoc[]', reader.peek_line
+        assert_equal 'include::fixtures/include-file.adoc[]', reader.read_line
         assert_equal '\\escape preserved here', reader.read_line
       end
 
       test 'include directive not at start of line is ignored' do
         input = <<-EOS
- include::include-file.asciidoc[]
+ include::include-file.adoc[]
         EOS
         para = block_from_string input
         assert_equal 1, para.lines.size
         # NOTE the space gets stripped because the line is treated as an inline literal
         assert_equal :literal, para.context
-        assert_equal 'include::include-file.asciidoc[]', para.source
+        assert_equal 'include::include-file.adoc[]', para.source
       end
 
       test 'include directive is disabled when max-include-depth attribute is 0' do
         input = <<-EOS
-include::include-file.asciidoc[]
+include::include-file.adoc[]
         EOS
-        para = block_from_string input, :safe => :safe, :attributes => { 'max-include-depth' => 0 }
+        para = block_from_string input, safe: :safe, attributes: { 'max-include-depth' => 0 }
         assert_equal 1, para.lines.size
-        assert_equal 'include::include-file.asciidoc[]', para.source
+        assert_equal 'include::include-file.adoc[]', para.source
       end
 
       test 'max-include-depth cannot be set by document' do
         input = <<-EOS
 :max-include-depth: 1
 
-include::include-file.asciidoc[]
+include::include-file.adoc[]
         EOS
-        para = block_from_string input, :safe => :safe, :attributes => { 'max-include-depth' => 0 }
+        para = block_from_string input, safe: :safe, attributes: { 'max-include-depth' => 0 }
         assert_equal 1, para.lines.size
-        assert_equal 'include::include-file.asciidoc[]', para.source
+        assert_equal 'include::include-file.adoc[]', para.source
       end
 
       test 'include directive should be disabled if max include depth has been exceeded' do
@@ -1188,14 +1503,14 @@ include::include-file.asciidoc[]
 include::fixtures/parent-include.adoc[depth=1]
         EOS
 
-        lines, warnings = redirect_streams do |_, err|
+        using_memory_logger do |logger|
           pseudo_docfile = File.join DIRNAME, 'include-master.adoc'
-          doc = empty_safe_document :base_dir => DIRNAME
-          reader = Asciidoctor::PreprocessorReader.new doc, input, Asciidoctor::Reader::Cursor.new(pseudo_docfile), :normalize => true
-          [reader.readlines, err.string]
+          doc = empty_safe_document base_dir: DIRNAME
+          reader = Asciidoctor::PreprocessorReader.new doc, input, Asciidoctor::Reader::Cursor.new(pseudo_docfile), normalize: true
+          lines = reader.readlines
+          assert_includes lines, 'include::child-include.adoc[]'
+          assert_message logger, :ERROR, 'fixtures/parent-include.adoc: line 3: maximum include depth of 1 exceeded', Hash
         end
-        assert_includes lines, 'include::child-include.adoc[]'
-        assert_match(/maximum include depth .* exceeded/, warnings)
       end
 
       test 'include directive should be disabled if max include depth set in nested context has been exceeded' do
@@ -1203,42 +1518,45 @@ include::fixtures/parent-include.adoc[depth=1]
 include::fixtures/parent-include-restricted.adoc[depth=3]
         EOS
 
-        lines, warnings = redirect_streams do |_, err|
+        using_memory_logger do |logger|
           pseudo_docfile = File.join DIRNAME, 'include-master.adoc'
-          doc = empty_safe_document :base_dir => DIRNAME
-          reader = Asciidoctor::PreprocessorReader.new doc, input, Asciidoctor::Reader::Cursor.new(pseudo_docfile), :normalize => true
-          [reader.readlines, err.string]
+          doc = empty_safe_document base_dir: DIRNAME
+          reader = Asciidoctor::PreprocessorReader.new doc, input, Asciidoctor::Reader::Cursor.new(pseudo_docfile), normalize: true
+          lines = reader.readlines
+          assert_includes lines, 'first line of child'
+          assert_includes lines, 'include::grandchild-include.adoc[]'
+          assert_message logger, :ERROR, 'fixtures/child-include.adoc: line 3: maximum include depth of 1 exceeded', Hash
         end
-        assert_includes lines, 'first line of child'
-        assert_includes lines, 'include::grandchild-include.adoc[]'
-        assert_match(/maximum include depth .* exceeded/, warnings)
       end
 
       test 'read_lines_until should not process lines if process option is false' do
-        lines = <<-EOS.each_line.to_a
+        lines = <<-EOS.lines
 ////
 include::fixtures/no-such-file.adoc[]
 ////
         EOS
 
-        doc = empty_safe_document :base_dir => DIRNAME
-        reader = Asciidoctor::PreprocessorReader.new doc, lines, nil, :normalize => true
+        doc = empty_safe_document base_dir: DIRNAME
+        reader = Asciidoctor::PreprocessorReader.new doc, lines, nil, normalize: true
         reader.read_line
-        result = reader.read_lines_until(:terminator => '////', :skip_processing => true)
+        result = reader.read_lines_until(terminator: '////', skip_processing: true)
         assert_equal lines.map {|l| l.chomp}[1..1], result
       end
 
       test 'skip_comment_lines should not process lines read' do
-        lines = <<-EOS.each_line.to_a
+        lines = <<-EOS.lines
 ////
 include::fixtures/no-such-file.adoc[]
 ////
         EOS
 
-        doc = empty_safe_document :base_dir => DIRNAME
-        reader = Asciidoctor::PreprocessorReader.new doc, lines, nil, :normalize => true
-        result = reader.skip_comment_lines
-        assert_equal lines.map {|l| l.chomp}, result
+        using_memory_logger do |logger|
+          doc = empty_safe_document base_dir: DIRNAME
+          reader = Asciidoctor::PreprocessorReader.new doc, lines, nil, normalize: true
+          reader.skip_comment_lines
+          assert reader.empty?
+          assert logger.empty?
+        end
       end
     end
 
@@ -1252,7 +1570,7 @@ endif::asciidoctor[]
 
         doc = Asciidoctor::Document.new input
         reader = doc.reader
-        assert_nil reader.process_line(reader.lines.first)
+        assert_nil reader.send :process_line, reader.lines.first
       end
 
       test 'peek_line advances cursor to next conditional line of content' do
@@ -1313,7 +1631,7 @@ endif::asciidoctor[]
 
         doc = Asciidoctor::Document.new input
         reader = doc.reader
-        refute_nil reader.process_line(reader.lines.first)
+        refute_nil reader.send :process_line, reader.lines.first
       end
 
       test 'peek_line does not advance cursor when on a regular content line' do
@@ -1352,7 +1670,7 @@ There is a holy grail!
 endif::holygrail[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'holygrail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'holygrail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1368,7 +1686,7 @@ ifdef::holygrail[There is a holy grail!]
 There was much rejoicing.
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'holygrail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'holygrail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1379,10 +1697,10 @@ There was much rejoicing.
 
       test 'ifdef with defined attribute processes include directive in brackets' do
         input = <<-EOS
-ifdef::asciidoctor-version[include::fixtures/include-file.asciidoc[tag=snippetA]]
+ifdef::asciidoctor-version[include::fixtures/include-file.adoc[tag=snippetA]]
         EOS
 
-        doc = Asciidoctor::Document.new input, :safe => :safe, :base_dir => DIRNAME
+        doc = Asciidoctor::Document.new input, safe: :safe, base_dir: DIRNAME
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1398,7 +1716,7 @@ The script is shown!
 endif::showScript[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'showscript' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'showscript' => '' }
         result = doc.reader.read
         assert_equal 'The script is shown!', result
       end
@@ -1410,7 +1728,7 @@ ifndef::hardships[There is a holy grail!]
 There was no rejoicing.
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'hardships' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'hardships' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1430,7 +1748,7 @@ grail
 endif::grail[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'grail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'grail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1448,7 +1766,7 @@ endif::grail[]
 endif::grail[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'grail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'grail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1468,7 +1786,7 @@ grail
 endif::grail[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'grail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'grail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1490,7 +1808,7 @@ endif::swallow[]
 gone
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'grail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'grail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1512,7 +1830,7 @@ endif::[]
 gone
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'grail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'grail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1528,7 +1846,7 @@ Our quest is complete!
 endif::holygrail,swallow[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'swallow' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'swallow' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1560,7 +1878,7 @@ Our quest is complete!
 endif::holygrail+swallow[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'holygrail' => '', 'swallow' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'holygrail' => '', 'swallow' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1576,7 +1894,7 @@ Our quest is complete!
 endif::holygrail+swallow[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'holygrail' => '' }
+        doc = Asciidoctor::Document.new input, attributes: { 'holygrail' => '' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1592,14 +1910,14 @@ endif::holygrail+swallow[]
           'asciidoctor+' => '',
           '+asciidoctor' => '',
           'asciidoctor,,asciidoctor-version' => 'content',
-          'asciidoctor++asciidoctor-version' => ''
+          'asciidoctor++asciidoctor-version' => '',
         }.each do |condition, expected|
           input = <<-EOS
 ifdef::#{condition}[]
 content
 endif::[]
           EOS
-          assert_equal expected, (document_from_string input, :parse => false).reader.read
+          assert_equal expected, (document_from_string input, parse: false).reader.read
         end
       end
 
@@ -1626,7 +1944,7 @@ Our quest is complete!
 endif::holygrail,swallow[]
         EOS
 
-        result = (Asciidoctor::Document.new input, :attributes => { 'swallow' => '' }).reader.read
+        result = (Asciidoctor::Document.new input, attributes: { 'swallow' => '' }).reader.read
         assert_empty result
       end
 
@@ -1637,7 +1955,7 @@ Our quest is complete!
 endif::holygrail,swallow[]
         EOS
 
-        result = (Asciidoctor::Document.new input, :attributes => { 'swallow' => '', 'holygrail' => '' }).reader.read
+        result = (Asciidoctor::Document.new input, attributes: { 'swallow' => '', 'holygrail' => '' }).reader.read
         assert_empty result
       end
 
@@ -1670,7 +1988,7 @@ Our quest is complete!
 endif::holygrail+swallow[]
         EOS
 
-        result = (Asciidoctor::Document.new input, :attributes => { 'swallow' => '', 'holygrail' => '' }).reader.read
+        result = (Asciidoctor::Document.new input, attributes: { 'swallow' => '', 'holygrail' => '' }).reader.read
         assert_empty result
       end
 
@@ -1681,7 +1999,7 @@ Our quest is complete!
 endif::holygrail+swallow[]
         EOS
 
-        result = (Asciidoctor::Document.new input, :attributes => { 'swallow' => '' }).reader.read
+        result = (Asciidoctor::Document.new input, attributes: { 'swallow' => '' }).reader.read
         assert_equal 'Our quest is complete!', result
       end
 
@@ -1740,7 +2058,7 @@ Asciidoctor it is!
 endif::[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'gem' => 'asciidoctor' }
+        doc = Asciidoctor::Document.new input, attributes: { 'gem' => 'asciidoctor' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1756,7 +2074,7 @@ Asciidoctor it is!
 endif::[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'gem' => 'asciidoctor' }
+        doc = Asciidoctor::Document.new input, attributes: { 'gem' => 'asciidoctor' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1772,7 +2090,7 @@ Asciidoctor it is!
 endif::[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'gem' => 'tilt' }
+        doc = Asciidoctor::Document.new input, attributes: { 'gem' => 'tilt' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1836,7 +2154,7 @@ One ring to rule them all!
 endif::[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'rings' => '1' }
+        doc = Asciidoctor::Document.new input, attributes: { 'rings' => '1' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?
@@ -1852,7 +2170,7 @@ One ring to rule them all!
 endif::[]
         EOS
 
-        doc = Asciidoctor::Document.new input, :attributes => { 'rings' => '1' }
+        doc = Asciidoctor::Document.new input, attributes: { 'rings' => '1' }
         reader = doc.reader
         lines = []
         while reader.has_more_lines?

@@ -1,4 +1,3 @@
-# encoding: UTF-8
 module Asciidoctor
   # A base module for defining converters that can be used to convert {AbstractNode}
   # objects in a parsed AsciiDoc document to a backend format such as HTML or
@@ -20,12 +19,12 @@ module Asciidoctor
   #       super
   #       outfilesuffix '.txt'
   #     end
-  #     def convert node, transform = nil
+  #     def convert node, transform = nil, opts = {}
   #       case (transform ||= node.node_name)
   #       when 'document'
   #         node.content
   #       when 'section'
-  #         [node.title, node.content] * "\n\n"
+  #         [node.title, node.content].join "\n\n"
   #       when 'paragraph'
   #         node.content.tr("\n", ' ') << "\n"
   #       else
@@ -54,15 +53,10 @@ module Asciidoctor
       # Returns nothing
       def register_for *backends
         Factory.register self, backends
-        metaclass = class << self; self; end
         if backends == ['*']
-          metaclass.send :define_method, :converts? do |name|
-            true
-          end
+          define_singleton_method(:converts?) {|name| true }
         else
-          metaclass.send :define_method, :converts? do |name|
-            backends.include? name
-          end
+          define_singleton_method(:converts?) {|name| backends.include? name }
         end
         nil
       end
@@ -70,14 +64,14 @@ module Asciidoctor
 
     module BackendInfo
       def backend_info
-        @backend_info ||= setup_backend_info
+        @backend_info ||= init_backend_info
       end
 
-      def setup_backend_info
+      private def init_backend_info
         raise ::ArgumentError, %(Cannot determine backend for converter: #{self.class}) unless @backend
         base = @backend.sub TrailingDigitsRx, ''
         if (ext = DEFAULT_EXTENSIONS[base])
-          type = ext[1..-1]
+          type = ext.slice 1, ext.length
         else
           # QUESTION should we be forcing the basebackend to html if unknown?
           base = 'html'
@@ -86,54 +80,62 @@ module Asciidoctor
           syntax = 'html'
         end
         {
-          'basebackend' => base,
-          'outfilesuffix' => ext,
-          'filetype' => type,
-          'htmlsyntax' => syntax
+          basebackend: base,
+          outfilesuffix: ext,
+          filetype: type,
+          htmlsyntax: syntax,
         }
       end
 
       def filetype value = nil
         if value
-          backend_info['filetype'] = value
+          backend_info[:filetype] = value
         else
-          backend_info['filetype']
+          backend_info[:filetype]
         end
       end
 
       def basebackend value = nil
         if value
-          backend_info['basebackend'] = value
+          backend_info[:basebackend] = value
         else
-          backend_info['basebackend']
+          backend_info[:basebackend]
         end
       end
 
       def outfilesuffix value = nil
         if value
-          backend_info['outfilesuffix'] = value
+          backend_info[:outfilesuffix] = value
         else
-          backend_info['outfilesuffix']
+          backend_info[:outfilesuffix]
         end
       end
 
       def htmlsyntax value = nil
         if value
-          backend_info['htmlsyntax'] = value
+          backend_info[:htmlsyntax] = value
         else
-          backend_info['htmlsyntax']
+          backend_info[:htmlsyntax]
         end
+      end
+
+      def supports_templates
+        backend_info[:supports_templates] = true
+      end
+
+      def supports_templates?
+        backend_info[:supports_templates]
       end
     end
 
     class << self
-      # Mixes the {Config Converter::Config} module into any class that includes the {Converter} module.
+      # Private: Mixes the {Config Converter::Config} module into any class that includes the {Converter} module.
       #
-      # converter - The Class that includes the {Converter} module
+      # into - The Class that includes the {Converter} module
       #
       # Returns nothing
-      def included converter
-        converter.extend Config
+      private def included into
+        into.extend Config
       end
     end
 
@@ -148,7 +150,6 @@ module Asciidoctor
     # Returns a new instance of [Converter]
     def initialize backend, opts = {}
       @backend = backend
-      setup_backend_info
     end
 
 =begin
@@ -176,12 +177,14 @@ module Asciidoctor
     #             the transform is typically derived from the value of the
     #             node's node_name property. (optional, default: nil)
     # opts      - An optional Hash of options that provide additional hints about
-    #             how to convert the node. (optional, default: {})
+    #             how to convert the node. (optional, default: nil)
     #
     # Returns the [String] result
-    def convert node, transform = nil, opts = {}
+    def convert node, transform = nil, opts = nil
       raise ::NotImplementedError
     end
+
+    alias handles? respond_to?
 
     # Alias for backward compatibility.
     alias convert_with_options convert
@@ -201,10 +204,10 @@ module Asciidoctor
     def write output, target
       if target.respond_to? :write
         target.write output.chomp
-        # ensure there's a trailing endline to be nice to terminals
+        # ensure there's a trailing newline to be nice to terminals
         target.write LF
       else
-        ::IO.write target, output
+        ::File.write target, output, mode: FILE_WRITE_MODE
       end
       nil
     end
@@ -218,5 +221,5 @@ module Asciidoctor
   end
 end
 
-require 'asciidoctor/converter/base'
-require 'asciidoctor/converter/factory'
+require_relative 'converter/base'
+require_relative 'converter/factory'

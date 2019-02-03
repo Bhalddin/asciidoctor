@@ -1,4 +1,3 @@
-# encoding: UTF-8
 module Asciidoctor
 # Public: Methods for managing AsciiDoc lists (ordered, unordered and description lists)
 class List < AbstractBlock
@@ -10,7 +9,7 @@ class List < AbstractBlock
   # Public: Create alias to check if this list has blocks
   alias items? blocks?
 
-  def initialize parent, context
+  def initialize parent, context, opts = {}
     super
   end
 
@@ -57,7 +56,7 @@ class ListItem < AbstractBlock
     super parent, :list_item
     @text = text
     @level = parent.level
-    @subs = NORMAL_SUBS.dup
+    @subs = NORMAL_SUBS.drop 0
   end
 
   # Public: A convenience method that checks whether the text of this list item
@@ -73,7 +72,8 @@ class ListItem < AbstractBlock
   #
   # Returns the converted String text for this ListItem
   def text
-    apply_subs @text, @subs
+    # NOTE @text can be nil if dd node only has block content
+    @text && (apply_subs @text, @subs)
   end
 
   # Public: Set the String text.
@@ -99,7 +99,7 @@ class ListItem < AbstractBlock
     !simple?
   end
 
-  # Public: Fold the first paragraph block into the text
+  # Internal: Fold the first paragraph block into the text
   #
   # Here are the rules for when a folding occurs:
   #
@@ -126,6 +126,5 @@ class ListItem < AbstractBlock
   def to_s
     %(#<#{self.class}@#{object_id} {list_context: #{parent.context.inspect}, text: #{@text.inspect}, blocks: #{(@blocks || []).size}}>)
   end
-
 end
 end

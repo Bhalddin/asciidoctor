@@ -6,11 +6,9 @@ module Asciidoctor
   #
   # See http://www.gnu.org/software/groff/manual/html_node/Man-usage.html#Man-usage
   class Converter::ManPageConverter < Converter::BuiltIn
-    LF = %(\n)
-    TAB = %(\t)
     WHITESPACE = %(#{LF}#{TAB} )
     ET = ' ' * 8
-    ESC = %(\u001b) # troff leader marker
+    ESC = ?\u001b # troff leader marker
     ESC_BS = %(#{ESC}\\) # escaped backslash (indicates troff formatting sequence)
     ESC_FS = %(#{ESC}.)  # escaped full stop (indicates troff macro)
 
@@ -18,8 +16,9 @@ module Asciidoctor
     LeadingPeriodRx = /^\./
     EscapedMacroRx = /^(?:#{ESC}\\c\n)?#{ESC}\.((?:URL|MTO) ".*?" ".*?" )( |[^\s]*)(.*?)(?: *#{ESC}\\c)?$/
     MockBoundaryRx = /<\/?BOUNDARY>/
-    EmDashCharRefRx = /&#8212(?:;&#8203;)?/
+    EmDashCharRefRx = /&#8212;(?:&#8203;)?/
     EllipsisCharRefRx = /&#8230;(?:&#8203;)?/
+    WrappedIndentRx = /#{CG_BLANK}*#{LF}#{CG_BLANK}*/
 
     # Converts HTML entity references back to their original form, escapes
     # special man characters and strips trailing whitespace.
@@ -28,11 +27,21 @@ module Asciidoctor
     #
     # str  - the String to convert
     # opts - an Hash of options to control processing (default: {})
-    #        * :preserve_space a Boolean that indicates whether to preserve spaces (only expanding tabs) if true
-    #          or to collapse all adjacent whitespace to a single space if false (default: true)
-    #        * :append_newline a Boolean that indicates whether to append an endline to the result (default: false)
+    #        * :whitespace an enum that indicates how to handle whitespace; supported options are:
+    #          :preserve - preserve spaces (only expanding tabs); :normalize - normalize whitespace
+    #          (remove spaces around newlines); :collapse - collapse adjacent whitespace to a single
+    #          space (default: :collapse)
+    #        * :append_newline a Boolean that indicates whether to append a newline to the result (default: false)
     def manify str, opts = {}
-      str = ((opts.fetch :preserve_space, true) ? (str.gsub TAB, ET) : (str.tr_s WHITESPACE, ' ')).
+      case opts.fetch :whitespace, :collapse
+      when :preserve
+        str = str.gsub TAB, ET
+      when :normalize
+        str = str.gsub WrappedIndentRx, LF
+      else
+        str = str.tr_s WHITESPACE, ' '
+      end
+      str = str.
         gsub(LiteralBackslashRx, '\&(rs'). # literal backslash (not a troff escape sequence)
         gsub(LeadingPeriodRx, '\\\&.'). # leading . is used in troff for macro call or other formatting; replace with \&.
         # drop orphaned \c escape lines, unescape troff macro, quote adjacent character, isolate macro line
@@ -57,6 +66,7 @@ module Asciidoctor
         gsub('&#8656;', '\(lA').  # leftwards double arrow
         gsub('&#8658;', '\(rA').  # rightwards double arrow
         gsub('&#8203;', '\:').    # zero width space
+        gsub('&amp;','&').        # literal ampersand (NOTE must take place after any other replacement that includes &)
         gsub('\'', '\(aq').       # apostrophe-quote
         gsub(MockBoundaryRx, ''). # mock boundary
         gsub(ESC_BS, '\\').       # unescape troff backslash (NOTE update if more escapes are added)
@@ -66,7 +76,7 @@ module Asciidoctor
     end
 
     def skip_with_warning node, name = nil
-      warn %(asciidoctor: WARNING: converter missing for #{name || node.node_name} node in manpage backend)
+      logger.warn %(converter missing for #{name || node.node_name} node in manpage backend)
       nil
     end
 
@@ -77,6 +87,8 @@ module Asciidoctor
       mantitle = node.attr 'mantitle'
       manvolnum = node.attr 'manvolnum', '1'
       manname = node.attr 'manname', mantitle
+      manmanual = node.attr 'manmanual'
+      mansource = node.attr 'mansource'
       docdate = (node.attr? 'reproducible') ? nil : (node.attr 'docdate')
       # NOTE the first line enables the table (tbl) preprocessor, necessary for non-Linux systems
       result = [%('\\" t
@@ -84,12 +96,12 @@ module Asciidoctor
 .\\"    Author: #{(node.attr? 'authors') ? (node.attr 'authors') : '[see the "AUTHOR(S)" section]'}
 .\\" Generator: Asciidoctor #{node.attr 'asciidoctor-version'})]
       result << %(.\\"      Date: #{docdate}) if docdate
-      result << %(.\\"    Manual: #{(manual = node.attr 'manmanual') || '\ \&'}
-.\\"    Source: #{(source = node.attr 'mansource') || '\ \&'}
+      result << %(.\\"    Manual: #{manmanual ? (manmanual.tr_s WHITESPACE, ' ') : '\ \&'}
+.\\"    Source: #{mansource ? (mansource.tr_s WHITESPACE, ' ') : '\ \&'}
 .\\"  Language: English
 .\\")
       # TODO add document-level setting to disable capitalization of manname
-      result << %(.TH "#{manify manname.upcase}" "#{manvolnum}" "#{docdate}" "#{source ? (manify source) : '\ \&'}" "#{manual ? (manify manual) : '\ \&'}")
+      result << %(.TH "#{manify manname.upcase}" "#{manvolnum}" "#{docdate}" "#{mansource ? (manify mansource) : '\ \&'}" "#{manmanual ? (manify manmanual) : '\ \&'}")
       # define portability settings
       # see http://bugs.debian.org/507673
       # see http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
@@ -130,8 +142,8 @@ module Asciidoctor
       unless node.noheader
         if node.attr? 'manpurpose'
           mannames = node.attr 'mannames', [manname]
-          result << %(.SH "#{(node.attr 'manname-title').upcase}"
-#{mannames.map {|n| manify n } * ', '} \\- #{manify node.attr 'manpurpose'})
+          result << %(.SH "#{(node.attr 'manname-title', 'NAME').upcase}"
+#{mannames.map {|n| manify n }.join ', '} \\- #{manify node.attr('manpurpose'), whitespace: :normalize})
         end
       end
 
@@ -143,22 +155,21 @@ module Asciidoctor
         result.concat(node.footnotes.map {|fn| %(#{fn.index}. #{fn.text}) })
       end
 
-      # FIXME we really need an API that returns the authors as an array
-      if (num_authors = (node.attr 'authorcount') || 0) > 0
-        if num_authors == 1
+      unless (authors = node.authors).empty?
+        if authors.size > 1
+          result << '.SH "AUTHORS"'
+          authors.each do |author|
+            result << %(.sp
+#{author.name})
+          end
+        else
           result << %(.SH "AUTHOR"
 .sp
-#{node.attr 'author'})
-        else
-          result << '.SH "AUTHORS"'
-          (1.upto num_authors).each do |i|
-            result << %(.sp
-#{node.attr "author_#{i}"})
-          end
+#{authors[0].name})
         end
       end
 
-      result * LF
+      result.join LF
     end
 
     # NOTE embedded doesn't really make sense in the manpage backend
@@ -172,7 +183,7 @@ module Asciidoctor
 
       # QUESTION should we add an AUTHOR(S) section?
 
-      result * LF
+      result.join LF
     end
 
     def section node
@@ -187,7 +198,7 @@ module Asciidoctor
       end
       result << %(.#{macro} "#{manify stitle}"
 #{node.content})
-      result * LF
+      result.join LF
     end
 
     def admonition node
@@ -199,13 +210,13 @@ module Asciidoctor
 .nr an-break-flag 1
 .br
 .ps +1
-.B #{node.attr 'textlabel'}#{node.title? ? "\\fP: #{manify node.title}" : nil}
+.B #{node.attr 'textlabel'}#{node.title? ? "\\fP: #{manify node.title}" : ''}
 .ps -1
 .br
 #{resolve_content node}
 .sp .5v
 .RE)
-      result * LF
+      result.join LF
     end
 
     alias audio skip_with_warning
@@ -222,12 +233,12 @@ r lw(\n(.lu*75u/100u).'
       num = 0
       node.items.each do |item|
         result << %(\\fB(#{num += 1})\\fP\\h'-2n':T{)
-        result << (manify item.text)
+        result << (manify item.text, whitespace: :normalize)
         result << item.content if item.blocks?
         result << 'T}'
       end
       result << '.TE'
-      result * LF
+      result.join LF
     end
 
     # TODO implement horizontal (if it makes sense)
@@ -242,20 +253,20 @@ r lw(\n(.lu*75u/100u).'
         case node.style
         when 'qanda'
           result << %(.sp
-#{counter}. #{manify([*terms].map {|dt| dt.text } * ' ')}
+#{counter}. #{manify [*terms].map {|dt| dt.text }.join ' '}
 .RS 4)
         else
           result << %(.sp
-#{manify([*terms].map {|dt| dt.text } * ', ')}
+#{manify [*terms].map {|dt| dt.text }.join(', '), whitespace: :normalize}
 .RS 4)
         end
         if dd
-          result << (manify dd.text) if dd.text?
+          result << (manify dd.text, whitespace: :normalize) if dd.text?
           result << dd.content if dd.blocks?
         end
         result << '.RE'
       end
-      result * LF
+      result.join LF
     end
 
     def example node
@@ -266,7 +277,7 @@ r lw(\n(.lu*75u/100u).'
       result << %(.RS 4
 #{resolve_content node}
 .RE)
-      result * LF
+      result.join LF
     end
 
     def floating_title node
@@ -283,10 +294,10 @@ r lw(\n(.lu*75u/100u).'
       result << %(.sp
 .if n .RS 4
 .nf
-#{manify node.content}
+#{manify node.content, whitespace: :preserve}
 .fi
 .if n .RE)
-      result * LF
+      result.join LF
     end
 
     def literal node
@@ -297,10 +308,10 @@ r lw(\n(.lu*75u/100u).'
       result << %(.sp
 .if n .RS 4
 .nf
-#{manify node.content}
+#{manify node.content, whitespace: :preserve}
 .fi
 .if n .RE)
-      result * LF
+      result.join LF
     end
 
     def olist node
@@ -319,11 +330,11 @@ r lw(\n(.lu*75u/100u).'
 .  sp -1
 .  IP " #{idx + 1}." 4.2
 .\\}
-#{manify item.text})
+#{manify item.text, whitespace: :normalize})
         result << item.content if item.blocks?
         result << '.RE'
       end
-      result * LF
+      result.join LF
     end
 
     def open node
@@ -343,10 +354,10 @@ r lw(\n(.lu*75u/100u).'
         %(.sp
 .B #{manify node.title}
 .br
-#{manify node.content})
+#{manify node.content, whitespace: :normalize})
       else
         %(.sp
-#{manify node.content})
+#{manify node.content, whitespace: :normalize})
       end
     end
 
@@ -356,29 +367,27 @@ r lw(\n(.lu*75u/100u).'
       result = []
       if node.title?
         result << %(.sp
-.in +.3i
+.RS 3
 .B #{manify node.title}
 .br
-.in)
+.RE)
       end
       attribution_line = (node.attr? 'citetitle') ? %(#{node.attr 'citetitle'} ) : nil
       attribution_line = (node.attr? 'attribution') ? %[#{attribution_line}\\(em #{node.attr 'attribution'}] : nil
-      result << %(.in +.3i
-.ll -.3i
-.nf
+      result << %(.RS 3
+.ll -.6i
 #{resolve_content node}
-.fi
 .br
-.in
+.RE
 .ll)
       if attribution_line
-        result << %(.in +.5i
-.ll -.5i
+        result << %(.RS 5
+.ll -.10i
 #{attribution_line}
-.in
+.RE
 .ll)
       end
-      result * LF
+      result.join LF
     end
 
     alias sidebar skip_with_warning
@@ -386,7 +395,7 @@ r lw(\n(.lu*75u/100u).'
     def stem node
       title_element = node.title? ? %(.sp
 .B #{manify node.title}
-.br) : nil
+.br) : ''
       open, close = BLOCK_MATH_DELIMITERS[node.style.to_sym]
 
       unless ((equation = node.content).start_with? open) && (equation.end_with? close)
@@ -447,7 +456,7 @@ allbox tab(:);'
                 row_header[row_index][cell_index + 1] ||= []
                 row_header[row_index][cell_index + 1] << %(#{cell_halign}tB)
               end
-              row_text[row_index] << %(#{manify cell.text}#{LF})
+              row_text[row_index] << %(#{manify cell.text, whitespace: :normalize}#{LF})
             elsif tsec == :body
               if row_header[row_index].empty? || row_header[row_index][cell_index].empty?
                 row_header[row_index][cell_index] << %(#{cell_halign}t)
@@ -459,11 +468,11 @@ allbox tab(:);'
               when :asciidoc
                 cell_content = cell.content
               when :literal
-                cell_content = %(.nf#{LF}#{manify cell.text}#{LF}.fi)
+                cell_content = %(.nf#{LF}#{manify cell.text, whitespace: :preserve}#{LF}.fi)
               when :verse
-                cell_content = %(.nf#{LF}#{manify cell.text}#{LF}.fi)
+                cell_content = %(.nf#{LF}#{manify cell.text, whitespace: :preserve}#{LF}.fi)
               else
-                cell_content = manify cell.content.join
+                cell_content = manify cell.content.join, whitespace: :normalize
               end
               row_text[row_index] << %(#{cell_content}#{LF})
             elsif tsec == :foot
@@ -473,7 +482,7 @@ allbox tab(:);'
                 row_header[row_index][cell_index + 1] ||= []
                 row_header[row_index][cell_index + 1] << %(#{cell_halign}tB)
               end
-              row_text[row_index] << %(#{manify cell.text}#{LF})
+              row_text[row_index] << %(#{manify cell.text, whitespace: :normalize}#{LF})
             end
             if cell.colspan && cell.colspan > 1
               (cell.colspan - 1).times do |i|
@@ -510,13 +519,13 @@ allbox tab(:);'
       #row_header.each do |row|
       #  result << LF
       #  row.each_with_index do |cell, i|
-      #    result << (cell * ' ')
+      #    result << (cell.join ' ')
       #    result << ' ' if row.size > i + 1
       #  end
       #end
       # FIXME temporary fix to get basic table to display
       result << LF
-      result << row_header[0].map { 'lt' } * ' '
+      result << ('lt ' * row_header[0].size).chop
 
       result << %(.#{LF})
       row_text.each do |row|
@@ -539,7 +548,7 @@ allbox tab(:);'
       result << %(.sp
 .B #{manify node.title}
 .br) if node.title?
-      node.items.map {|item|
+      node.items.map do |item|
         result << %[.sp
 .RS 4
 .ie n \\{\\
@@ -549,11 +558,11 @@ allbox tab(:);'
 .  sp -1
 .  IP \\(bu 2.3
 .\\}
-#{manify item.text}]
+#{manify item.text, whitespace: :normalize}]
         result << item.content if item.blocks?
         result << '.RE'
-      }
-      result * LF
+      end
+      result.join LF
     end
 
     # FIXME git uses [verse] for the synopsis; detect this special case
@@ -568,7 +577,7 @@ allbox tab(:);'
       attribution_line = (node.attr? 'attribution') ? %[#{attribution_line}\\(em #{node.attr 'attribution'}] : nil
       result << %(.sp
 .nf
-#{manify node.content}
+#{manify node.content, whitespace: :preserve}
 .fi
 .br)
       if attribution_line
@@ -578,35 +587,36 @@ allbox tab(:);'
 .in
 .ll)
       end
-      result * LF
+      result.join LF
     end
 
     def video node
-      start_param = (node.attr? 'start', nil, false) ? %(&start=#{node.attr 'start'}) : nil
-      end_param = (node.attr? 'end', nil, false) ? %(&end=#{node.attr 'end'}) : nil
+      start_param = (node.attr? 'start', nil, false) ? %(&start=#{node.attr 'start'}) : ''
+      end_param = (node.attr? 'end', nil, false) ? %(&end=#{node.attr 'end'}) : ''
       result = []
       result << %(.sp
 .B #{manify node.title}
 .br) if node.title?
       result << %(<#{node.media_uri(node.attr 'target')}#{start_param}#{end_param}> (video))
-      result * LF
+      result.join LF
     end
 
     def inline_anchor node
       target = node.target
       case node.type
       when :link
-        if (text = node.text) == target
-          text = nil
-        else
-          text = text.gsub '"', %[#{ESC_BS}(dq]
-        end
         if target.start_with? 'mailto:'
           macro = 'MTO'
-          target = target[7..-1].sub '@', %[#{ESC_BS}(at]
+          target = target.slice 7, target.length
         else
           macro = 'URL'
         end
+        if (text = node.text) == target
+          text = ''
+        else
+          text = text.gsub '"', %[#{ESC_BS}(dq]
+        end
+        target = target.sub '@', %[#{ESC_BS}(at] if macro == 'MTO'
         %(#{ESC_BS}c#{LF}#{ESC_FS}#{macro} "#{target}" "#{text}" )
       when :xref
         refid = (node.attr 'refid') || target
@@ -615,7 +625,8 @@ allbox tab(:);'
         # These are anchor points, which shouldn't be visible
         ''
       else
-        warn %(asciidoctor: WARNING: unknown anchor type: #{node.type.inspect})
+        logger.warn %(unknown anchor type: #{node.type.inspect})
+        nil
       end
     end
 
@@ -652,7 +663,7 @@ allbox tab(:);'
       if (keys = node.attr 'keys').size == 1
         keys[0]
       else
-        keys * %(#{ESC_BS}0+#{ESC_BS}0)
+        keys.join %(#{ESC_BS}0+#{ESC_BS}0)
       end
     end
 
@@ -660,7 +671,7 @@ allbox tab(:);'
       caret = %[#{ESC_BS}0#{ESC_BS}(fc#{ESC_BS}0]
       menu = node.attr 'menu'
       if !(submenus = node.attr 'submenus').empty?
-        submenu_path = submenus.map {|item| %(#{ESC_BS}fI#{item}#{ESC_BS}fP) } * caret
+        submenu_path = submenus.map {|item| %(#{ESC_BS}fI#{item}#{ESC_BS}fP) }.join caret
         %(#{ESC_BS}fI#{menu}#{ESC_BS}fP#{caret}#{submenu_path}#{caret}#{ESC_BS}fI#{node.attr 'menuitem'}#{ESC_BS}fP)
       elsif (menuitem = node.attr 'menuitem')
         %(#{ESC_BS}fI#{menu}#{caret}#{menuitem}#{ESC_BS}fP)
@@ -677,7 +688,7 @@ allbox tab(:);'
       when :strong
         %(#{ESC_BS}fB<BOUNDARY>#{node.text}</BOUNDARY>#{ESC_BS}fP)
       when :monospaced
-        %(#{ESC_BS}f[CR]<BOUNDARY>#{node.text}</BOUNDARY>#{ESC_BS}fP)
+        %[#{ESC_BS}f(CR<BOUNDARY>#{node.text}</BOUNDARY>#{ESC_BS}fP]
       when :single
         %[#{ESC_BS}(oq<BOUNDARY>#{node.text}</BOUNDARY>#{ESC_BS}(cq]
       when :double
@@ -688,7 +699,7 @@ allbox tab(:);'
     end
 
     def resolve_content node
-      node.content_model == :compound ? node.content : %(.sp#{LF}#{manify node.content})
+      node.content_model == :compound ? node.content : %(.sp#{LF}#{manify node.content, whitespace: :normalize})
     end
 
     def write_alternate_pages mannames, manvolnum, target
@@ -697,7 +708,7 @@ allbox tab(:);'
         manvolext = %(.#{manvolnum})
         dir, basename = ::File.split target
         mannames.each do |manname|
-          ::IO.write ::File.join(dir, %(#{manname}#{manvolext})), %(.so #{basename})
+          ::File.write ::File.join(dir, %(#{manname}#{manvolext})), %(.so #{basename}), mode: FILE_WRITE_MODE
         end
       end
     end

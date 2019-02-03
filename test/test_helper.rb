@@ -1,20 +1,18 @@
-# encoding: UTF-8
-ASCIIDOCTOR_PROJECT_DIR = File.dirname File.dirname(__FILE__)
-Dir.chdir ASCIIDOCTOR_PROJECT_DIR
-
-if RUBY_VERSION < '1.9'
-  require 'rubygems'
-end
+ASCIIDOCTOR_TEST_DIR = File.absolute_path __dir__
+ASCIIDOCTOR_LIB_DIR = ENV['ASCIIDOCTOR_LIB_DIR'] || (File.join ASCIIDOCTOR_TEST_DIR, '../lib')
 
 require 'simplecov' if ENV['COVERAGE'] == 'true'
 
-require File.join(ASCIIDOCTOR_PROJECT_DIR, 'lib', 'asciidoctor')
+require File.join ASCIIDOCTOR_LIB_DIR, 'asciidoctor'
+Dir.chdir Asciidoctor::ROOT_DIR
 
-require 'socket'
 require 'nokogiri'
+require 'socket'
+require 'tempfile'
 require 'tmpdir'
 
 autoload :FileUtils, 'fileutils'
+autoload :Open3, 'open3'
 autoload :Pathname,  'pathname'
 
 RE_XMLNS_ATTRIBUTE = / xmlns="[^"]+"/
@@ -31,7 +29,7 @@ class Minitest::Test
   end
 
   def disk_root
-    "#{windows? ? File.expand_path(__FILE__).split('/').first : nil}/"
+    %(#{windows? ? Asciidoctor::ROOT_DIR.split('/')[0] : ''}/)
   end
 
   def empty_document options = {}
@@ -50,7 +48,7 @@ class Minitest::Test
   def sample_doc_path(name)
     name = name.to_s
     unless name.include?('.')
-      ['asciidoc', 'txt'].each do |ext|
+      ['adoc', 'asciidoc', 'txt'].each do |ext|
         if File.exist?(fixture_path("#{name}.#{ext}"))
           name = "#{name}.#{ext}"
           break
@@ -60,29 +58,24 @@ class Minitest::Test
     fixture_path(name)
   end
 
-  def fixture_path(name)
-    File.join(File.expand_path(File.dirname(__FILE__)), 'fixtures', name)
+  def bindir
+    File.join Asciidoctor::ROOT_DIR, 'bin'
+  end
+
+  def testdir
+    ASCIIDOCTOR_TEST_DIR
+  end
+
+  def fixturedir
+    File.join testdir, 'fixtures'
+  end
+
+  def fixture_path name
+    File.join fixturedir, name
   end
 
   def example_document(name, opts = {})
-    document_from_string IO.read(sample_doc_path(name)), opts
-  end
-
-  def assert_difference(expression, difference = 1, message = nil, &block)
-    expressions = [expression]
-
-    exps = expressions.map { |e|
-      e.respond_to?(:call) ? e : lambda { eval(e, block.binding) }
-    }
-    before = exps.map { |e| e.call }
-
-    yield
-
-    expressions.zip(exps).each_with_index do |(code, e), i|
-      error  = "#{code.inspect} didn't change by #{difference}"
-      error  = "#{message}.\n#{error}" if message
-      assert_equal(before[i] + difference, e.call, error)
-    end
+    document_from_string File.read(sample_doc_path(name)), opts
   end
 
   def xmlnodes_at_css(css, content, count = nil)
@@ -143,24 +136,53 @@ class Minitest::Test
     end
   end
 
+  def assert_message logger, severity, expected_message, kind = String, idx = nil
+    unless idx
+      assert_equal 1, logger.messages.size
+      idx = 0
+    end
+    message = logger.messages[idx]
+    assert_equal severity, message[:severity]
+    assert_kind_of kind, message[:message]
+    if kind == String
+      actual_message = message[:message]
+    else
+      refute_nil message[:message][:source_location]
+      actual_message = message[:message].inspect
+    end
+    if expected_message.start_with? '~'
+      assert_includes actual_message, expected_message[1..-1]
+    else
+      assert_equal expected_message, actual_message
+    end
+  end
+
+  def assert_messages logger, expected_messages
+    assert_equal expected_messages.size, logger.messages.size
+    expected_messages.each_with_index do |expected_message_details, idx|
+      severity, expected_message, kind = expected_message_details
+      assert_message logger, severity, expected_message, (kind || String), idx
+    end
+  end
+
   def xmldoc_from_string(content)
     if content.match(RE_XMLNS_ATTRIBUTE)
-      doc = Nokogiri::XML::Document.parse(content)
+      Nokogiri::XML::Document.parse(content)
     elsif !(doctype_match = content.match(RE_DOCTYPE))
-      doc = Nokogiri::HTML::DocumentFragment.parse(content)
+      Nokogiri::HTML::DocumentFragment.parse(content)
     elsif doctype_match[1].start_with? 'html'
-      doc = Nokogiri::HTML::Document.parse(content)
+      Nokogiri::HTML::Document.parse(content)
     else
-      doc = Nokogiri::XML::Document.parse(content)
+      Nokogiri::XML::Document.parse(content)
     end
   end
 
   def document_from_string(src, opts = {})
     assign_default_test_options opts
     if opts[:parse]
-      (Asciidoctor::Document.new src.lines.entries, opts).parse
+      (Asciidoctor::Document.new src.lines, opts).parse
     else
-      Asciidoctor::Document.new src.lines.entries, opts
+      Asciidoctor::Document.new src.lines, opts
     end
   end
 
@@ -170,26 +192,26 @@ class Minitest::Test
     doc.blocks.first
   end
 
-  def render_string(src, opts = {})
+  def convert_string(src, opts = {})
     keep_namespaces = opts.delete(:keep_namespaces)
     if keep_namespaces
-      document_from_string(src, opts).render
+      document_from_string(src, opts).convert
     else
       # this is required because nokogiri is ignorant
-      result = document_from_string(src, opts).render
+      result = document_from_string(src, opts).convert
       result = result.sub(RE_XMLNS_ATTRIBUTE, '') if result
       result
     end
   end
 
-  def render_embedded_string(src, opts = {})
+  def convert_string_to_embedded(src, opts = {})
     opts[:header_footer] = false
-    document_from_string(src, opts).render
+    document_from_string(src, opts).convert
   end
 
-  def render_inline_string(src, opts = {})
+  def convert_inline_string(src, opts = {})
     opts[:doctype] = :inline
-    document_from_string(src, opts).render
+    document_from_string(src, opts).convert
   end
 
   def parse_header_metadata(source, doc = nil)
@@ -211,7 +233,6 @@ class Minitest::Test
     end
     if (template_dir = ENV['TEMPLATE_DIR'])
       opts[:template_dir] = template_dir unless opts.has_key? :template_dir
-      #opts[:template_dir] = File.join(File.dirname(__FILE__), '..', '..', 'asciidoctor-backends', 'erb') unless opts.has_key? :template_dir
     end
     nil
   end
@@ -230,14 +251,13 @@ class Minitest::Test
   end
 
   def invoke_cli_with_filenames(argv = [], filenames = [], &block)
-
     filepaths = Array.new
 
-    filenames.each { |filename|
-      if filenames.nil?|| ::Pathname.new(filename).absolute?
-        filepaths.push(filename)
+    filenames.each {|filename|
+      if filenames.nil? || ::Pathname.new(filename).absolute?
+        filepaths << filename
       else
-        filepaths.push(File.join(File.dirname(__FILE__), 'fixtures', filename))
+        filepaths << (fixture_path filename)
       end
     }
 
@@ -247,15 +267,15 @@ class Minitest::Test
     invoker
   end
 
-  def invoke_cli_to_buffer(argv = [], filename = 'sample.asciidoc', &block)
+  def invoke_cli_to_buffer(argv = [], filename = 'sample.adoc', &block)
     invoke_cli(argv, filename, [StringIO.new, StringIO.new], &block)
   end
 
-  def invoke_cli(argv = [], filename = 'sample.asciidoc', buffers = nil, &block)
+  def invoke_cli(argv = [], filename = 'sample.adoc', buffers = nil, &block)
     if filename.nil? || filename == '-' || ::Pathname.new(filename).absolute?
       filepath = filename
     else
-      filepath = File.join(File.dirname(__FILE__), 'fixtures', filename)
+      filepath = fixture_path filename
     end
     invoker = Asciidoctor::Cli::Invoker.new(argv + [filepath])
     if buffers
@@ -268,14 +288,29 @@ class Minitest::Test
   def redirect_streams
     old_stdout, $stdout = $stdout, (tmp_stdout = ::StringIO.new)
     old_stderr, $stderr = $stderr, (tmp_stderr = ::StringIO.new)
+    old_logger = Asciidoctor::LoggerManager.logger
+    old_logger_level = old_logger.level
+    new_logger = (Asciidoctor::LoggerManager.logger = Asciidoctor::Logger.new $stderr)
+    new_logger.level = old_logger_level
     yield tmp_stdout, tmp_stderr
   ensure
     $stdout, $stderr = old_stdout, old_stderr
+    Asciidoctor::LoggerManager.logger = old_logger
   end
 
   def resolve_localhost
-    (RUBY_VERSION < '1.9' || RUBY_ENGINE == 'rbx') ? Socket.gethostname :
-        Socket.ip_address_list.find {|addr| addr.ipv4? }.ip_address
+    Socket.ip_address_list.find {|addr| addr.ipv4? }.ip_address
+  end
+
+  def using_memory_logger
+    old_logger = Asciidoctor::LoggerManager.logger
+    memory_logger = Asciidoctor::MemoryLogger.new
+    begin
+      Asciidoctor::LoggerManager.logger = memory_logger
+      yield memory_logger
+    ensure
+      Asciidoctor::LoggerManager.logger = old_logger
+    end
   end
 
   def in_verbose_mode
@@ -288,32 +323,30 @@ class Minitest::Test
   end
 
   def using_test_webserver host = resolve_localhost, port = 9876
+    base_dir = testdir
     server = TCPServer.new host, port
-    base_dir = File.expand_path File.dirname __FILE__
-    t = Thread.new do
+    server_thread = Thread.start do
       while (session = server.accept)
         request = session.gets
-        resource = nil
-        if (m = /GET (\S+) HTTP\/1\.1$/.match(request.chomp))
-          resource = (resource = m[1]) == '' ? '.' : resource
+        if /^GET (\S+) HTTP\/1\.1$/ =~ request.chomp
+          resource = (resource = $1) == '' ? '.' : resource
         else
           session.print %(HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\n\r\n)
           session.print %(405 - Method not allowed\n)
           session.close
-          break
+          next
         end
-
         if resource == '/name/asciidoctor'
           session.print %(HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n)
           session.print %({"name": "asciidoctor"}\n)
         elsif File.file?(resource_file = (File.join base_dir, resource))
-          mimetype = if (ext = ::File.extname(resource_file)[1..-1])
+          mimetype = if (ext = File.extname(resource_file)[1..-1])
             ext == 'adoc' ? 'text/plain' : %(image/#{ext})
           else
             'text/plain'
           end
           session.print %(HTTP/1.1 200 OK\r\nContent-Type: #{mimetype}\r\n\r\n)
-          File.open resource_file, 'rb' do |fd|
+          File.open resource_file, Asciidoctor::FILE_READ_MODE do |fd|
             until fd.eof? do
               buffer = fd.read 256
               session.write buffer
@@ -329,13 +362,9 @@ class Minitest::Test
     begin
       yield
     ensure
-      begin
-        server.shutdown
-      # "Errno::ENOTCONN: Socket is not connected' is reported on some platforms; call #close instead of #shutdown
-      rescue Errno::ENOTCONN
-        server.close
-      end
-      t.exit
+      server_thread.exit
+      server_thread.value
+      server.close
     end
   end
 end

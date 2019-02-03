@@ -1,4 +1,3 @@
-# encoding: UTF-8
 module Asciidoctor
   # A {Converter} implementation that delegates to the chain of {Converter}
   # objects passed to the constructor. Selects the first {Converter} that
@@ -23,10 +22,10 @@ module Asciidoctor
     # node      - the AbstractNode to convert
     # transform - the optional String transform, or the name of the node if no
     #             transform is specified. (default: nil)
-    # opts      - an optional Hash that is passed to the delegate's convert method. (default: {})
+    # opts      - an optional Hash that is passed to the delegate's convert method. (default: nil)
     #
     # Returns the String result returned from the delegate's convert method
-    def convert node, transform = nil, opts = {}
+    def convert node, transform = nil, opts = nil
       transform ||= node.node_name
       (converter_for transform).convert node, transform, opts
     end
@@ -41,7 +40,7 @@ module Asciidoctor
       @converter_map[transform] ||= (find_converter transform)
     end
 
-    # Internal: Find the converter for the specified transform.
+    # Public: Find the converter for the specified transform.
     # Raise an exception if no converter is found.
     #
     # Returns the matching [Converter] object

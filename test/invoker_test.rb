@@ -1,13 +1,8 @@
-# encoding: UTF-8
-unless defined? ASCIIDOCTOR_PROJECT_DIR
-  $: << File.dirname(__FILE__); $:.uniq!
-  require 'test_helper'
-end
-require 'asciidoctor/cli/options'
-require 'asciidoctor/cli/invoker'
+require_relative 'test_helper'
+require File.join Asciidoctor::LIB_DIR, 'asciidoctor/cli'
 
 context 'Invoker' do
-  test 'should parse source and render as html5 article by default' do
+  test 'should parse source and convert to html5 article by default' do
     invoker = nil
     output = nil
     redirect_streams do |out, err|
@@ -33,8 +28,8 @@ context 'Invoker' do
   end
 
   test 'should set implicit doc info attributes' do
-    sample_filepath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.asciidoc'))
-    sample_filedir = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures'))
+    sample_filepath = fixture_path 'sample.adoc'
+    sample_filedir = fixturedir
     invoker = invoke_cli_to_buffer %w(-o /dev/null), sample_filepath
     doc = invoker.document
     assert_equal 'sample', doc.attr('docname')
@@ -48,13 +43,13 @@ context 'Invoker' do
   end
 
   test 'should allow docdate and doctime to be overridden' do
-    sample_filepath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.asciidoc'))
-    invoker = invoke_cli_to_buffer %w(-o /dev/null -a docdate=2015-01-01 -a doctime=10:00:00-07:00), sample_filepath
+    sample_filepath = fixture_path 'sample.adoc'
+    invoker = invoke_cli_to_buffer %w(-o /dev/null -a docdate=2015-01-01 -a doctime=10:00:00-0700), sample_filepath
     doc = invoker.document
     assert doc.attr?('docdate', '2015-01-01')
     assert doc.attr?('docyear', '2015')
-    assert doc.attr?('doctime', '10:00:00-07:00')
-    assert doc.attr?('docdatetime', '2015-01-01 10:00:00-07:00')
+    assert doc.attr?('doctime', '10:00:00-0700')
+    assert doc.attr?('docdatetime', '2015-01-01 10:00:00-0700')
   end
 
   test 'should accept document from stdin and write to stdout' do
@@ -76,8 +71,8 @@ context 'Invoker' do
   test 'should not fail to rewind input if reading document from stdin' do
     io = STDIN.dup
     class << io
-      def readlines
-        ['paragraph']
+      def read
+        'paragraph'
       end
     end
     invoker = invoke_cli_to_buffer(%w(-s), '-') { io }
@@ -86,7 +81,7 @@ context 'Invoker' do
   end
 
   test 'should accept document from stdin and write to output file' do
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample-output.html'))
+    sample_outpath = fixture_path 'sample-output.html'
     begin
       invoker = invoke_cli(%W(-s -o #{sample_outpath}), '-') { 'content' }
       doc = invoker.document
@@ -106,22 +101,22 @@ context 'Invoker' do
   end
 
   test 'should fail if input file matches resolved output file' do
-    invoker = invoke_cli_to_buffer %W(-a outfilesuffix=.asciidoc), 'sample.asciidoc'
+    invoker = invoke_cli_to_buffer %W(-a outfilesuffix=.adoc), 'sample.adoc'
     assert_match(/input file and output file cannot be the same/, invoker.read_error)
   end
 
   test 'should fail if input file matches specified output file' do
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.asciidoc'))
-    invoker = invoke_cli_to_buffer %W(-o #{sample_outpath}), 'sample.asciidoc'
+    sample_outpath = fixture_path 'sample.adoc'
+    invoker = invoke_cli_to_buffer %W(-o #{sample_outpath}), 'sample.adoc'
     assert_match(/input file and output file cannot be the same/, invoker.read_error)
   end
 
   test 'should accept input from named pipe and output to stdout' do
-    sample_inpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample-pipe.adoc'))
+    sample_inpath = fixture_path 'sample-pipe.adoc'
     begin
       %x(mkfifo #{sample_inpath})
       write_thread = Thread.new do
-        IO.write sample_inpath, 'pipe content'
+        File.write sample_inpath, 'pipe content'
       end
       invoker = invoke_cli_to_buffer %w(-a stylesheet!), sample_inpath
       result = invoker.read_output
@@ -130,10 +125,10 @@ context 'Invoker' do
     ensure
       FileUtils.rm_f sample_inpath
     end
-  end if RUBY_MIN_VERSION_1_9 && !windows?
+  end unless windows?
 
   test 'should allow docdir to be specified when input is a string' do
-    expected_docdir = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures'))
+    expected_docdir = fixturedir
     invoker = invoke_cli_to_buffer(%w(-s --base-dir test/fixtures -o /dev/null), '-') { 'content' }
     doc = invoker.document
     assert_equal expected_docdir, doc.attr('docdir')
@@ -141,7 +136,7 @@ context 'Invoker' do
   end
 
   test 'should display version and exit' do
-    expected = %(Asciidoctor #{Asciidoctor::VERSION} [http://asciidoctor.org]\nRuntime Environment (#{RUBY_DESCRIPTION}))
+    expected = %(Asciidoctor #{Asciidoctor::VERSION} [https://asciidoctor.org]\nRuntime Environment (#{RUBY_DESCRIPTION}))
     ['--version', '-V'].each do |switch|
       actual = nil
       redirect_streams do |out, err|
@@ -154,9 +149,9 @@ context 'Invoker' do
   end
 
   test 'should print warnings to stderr by default' do
-    input = <<-EOS
-2. second
-3. third
+    input = <<~'EOS'
+    2. second
+    3. third
     EOS
     warnings = nil
     redirect_streams do |out, err|
@@ -167,9 +162,9 @@ context 'Invoker' do
   end
 
   test 'should silence warnings if -q flag is specified' do
-    input = <<-EOS
-2. second
-3. third
+    input = <<~'EOS'
+    2. second
+    3. third
     EOS
     warnings = nil
     redirect_streams do |out, err|
@@ -177,6 +172,18 @@ context 'Invoker' do
       warnings = err.string
     end
     assert_equal '', warnings
+  end
+
+  test 'should return non-zero exit code if failure level is reached' do
+    input = <<~'EOS'
+    2. second
+    3. third
+    EOS
+    exit_code, messages = redirect_streams do |_, err|
+      [invoke_cli(%w(-q --failure-level=WARN -o /dev/null), '-') { input }.code, err.string]
+    end
+    assert_equal 1, exit_code
+    assert messages.empty?
   end
 
   test 'should report usage if no input file given' do
@@ -188,7 +195,7 @@ context 'Invoker' do
 
   test 'should report error if input file does not exist' do
     redirect_streams do |out, err|
-      invoker = invoke_cli [], 'missing_file.asciidoc'
+      invoker = invoke_cli [], 'missing_file.adoc'
       assert_match(/input file .* is missing/, err.string)
       assert_equal 1, invoker.code
     end
@@ -196,20 +203,20 @@ context 'Invoker' do
 
   test 'should treat extra arguments as files' do
     redirect_streams do |out, err|
-      invoker = invoke_cli %w(-o /dev/null extra arguments sample.asciidoc), nil
+      invoker = invoke_cli %w(-o /dev/null extra arguments sample.adoc), nil
       assert_match(/input file .* is missing/, err.string)
       assert_equal 1, invoker.code
     end
   end
 
   test 'should output to file name based on input file name' do
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.html'))
+    sample_outpath = fixture_path 'sample.html'
     begin
       invoker = invoke_cli
       doc = invoker.document
       assert_equal sample_outpath, doc.attr('outfile')
       assert File.exist?(sample_outpath)
-      output = IO.read(sample_outpath)
+      output = File.read(sample_outpath)
       refute_empty output
       assert_xpath '/html', output, 1
       assert_xpath '/html/head', output, 1
@@ -222,8 +229,8 @@ context 'Invoker' do
   end
 
   test 'should output to file in destination directory if set' do
-    destination_path = File.expand_path(File.join(File.dirname(__FILE__), 'test_output'))
-    sample_outpath = File.join(destination_path, 'sample.html')
+    destination_path = File.join testdir, 'test_output'
+    sample_outpath = File.join destination_path, 'sample.html'
     begin
       FileUtils.mkdir_p(destination_path)
       # QUESTION should -D be relative to working directory or source directory?
@@ -245,8 +252,7 @@ context 'Invoker' do
     sample_outpath = File.join destination_subdir_path, 'index.html'
     begin
       FileUtils.mkdir_p(destination_path)
-      invoker = invoke_cli %W(-D #{destination_path} -R test/fixtures), sample_inpath
-      doc = invoker.document
+      invoke_cli %W(-D #{destination_path} -R test/fixtures), sample_inpath
       assert File.directory?(destination_subdir_path)
       assert File.exist?(sample_outpath)
     ensure
@@ -257,7 +263,7 @@ context 'Invoker' do
   end
 
   test 'should output to file specified' do
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample-output.html'))
+    sample_outpath = fixture_path 'sample-output.html'
     begin
       invoker = invoke_cli %W(-o #{sample_outpath})
       doc = invoker.document
@@ -269,12 +275,11 @@ context 'Invoker' do
   end
 
   test 'should copy default stylesheet to target directory if linkcss is specified' do
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample-output.html'))
-    asciidoctor_stylesheet = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'asciidoctor.css'))
-    coderay_stylesheet = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'coderay-asciidoctor.css'))
+    sample_outpath = fixture_path 'sample-output.html'
+    asciidoctor_stylesheet = fixture_path 'asciidoctor.css'
+    coderay_stylesheet = fixture_path 'coderay-asciidoctor.css'
     begin
-      invoker = invoke_cli %W(-o #{sample_outpath} -a linkcss -a source-highlighter=coderay)
-      invoker.document
+      invoke_cli %W(-o #{sample_outpath} -a linkcss -a source-highlighter=coderay), 'source-block.adoc'
       assert File.exist?(sample_outpath)
       assert File.exist?(asciidoctor_stylesheet)
       assert File.exist?(coderay_stylesheet)
@@ -285,9 +290,25 @@ context 'Invoker' do
     end
   end
 
+  test 'should not copy coderay stylesheet to target directory when no source blocks where highlighted' do
+    sample_outpath = fixture_path 'sample-output.html'
+    asciidoctor_stylesheet = fixture_path 'asciidoctor.css'
+    coderay_stylesheet = fixture_path 'coderay-asciidoctor.css'
+    begin
+      invoke_cli %W(-o #{sample_outpath} -a linkcss -a source-highlighter=coderay)
+      assert File.exist?(sample_outpath)
+      assert File.exist?(asciidoctor_stylesheet)
+      refute File.exist?(coderay_stylesheet)
+    ensure
+      FileUtils.rm_f(sample_outpath)
+      FileUtils.rm_f(asciidoctor_stylesheet)
+      FileUtils.rm_f(coderay_stylesheet)
+    end
+  end
+
   test 'should not copy default stylesheet to target directory if linkcss is set and copycss is unset' do
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample-output.html'))
-    default_stylesheet = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'asciidoctor.css'))
+    sample_outpath = fixture_path 'sample-output.html'
+    default_stylesheet = fixture_path 'asciidoctor.css'
     begin
       invoker = invoke_cli %W(-o #{sample_outpath} -a linkcss -a copycss!)
       invoker.document
@@ -300,7 +321,7 @@ context 'Invoker' do
   end
 
   test 'should copy custom stylesheet to target directory if stylesheet and linkcss is specified' do
-    destdir = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'output'))
+    destdir = fixture_path 'output'
     sample_outpath = File.join destdir, 'sample-output.html'
     stylesdir = File.join destdir, 'styles'
     custom_stylesheet = File.join stylesdir, 'custom.css'
@@ -318,7 +339,7 @@ context 'Invoker' do
   end
 
   test 'should not copy custom stylesheet to target directory if stylesheet and linkcss are set and copycss is unset' do
-    destdir = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'output'))
+    destdir = fixture_path 'output'
     sample_outpath = File.join destdir, 'sample-output.html'
     stylesdir = File.join destdir, 'styles'
     custom_stylesheet = File.join stylesdir, 'custom.css'
@@ -336,7 +357,7 @@ context 'Invoker' do
   end
 
   test 'should not copy custom stylesheet to target directory if stylesdir is a URI' do
-    destdir = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'output'))
+    destdir = fixture_path 'output'
     sample_outpath = File.join destdir, 'sample-output.html'
     stylesdir = File.join destdir, 'http:'
     begin
@@ -351,11 +372,11 @@ context 'Invoker' do
     end
   end
 
-  test 'should render all passed files' do
-    basic_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'basic.html'))
-    sample_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.html'))
+  test 'should convert all passed files' do
+    basic_outpath = fixture_path 'basic.html'
+    sample_outpath = fixture_path 'sample.html'
     begin
-      invoke_cli_with_filenames [], %w(basic.asciidoc sample.asciidoc)
+      invoke_cli_with_filenames [], %w(basic.adoc sample.adoc)
       assert File.exist?(basic_outpath)
       assert File.exist?(sample_outpath)
     ensure
@@ -365,11 +386,11 @@ context 'Invoker' do
   end
 
   test 'options should not be modified when processing multiple files' do
-    destination_path = File.expand_path(File.join(File.dirname(__FILE__), 'test_output'))
-    basic_outpath = File.join(destination_path, 'basic.htm')
-    sample_outpath = File.join(destination_path, 'sample.htm')
+    destination_path = File.join testdir, 'test_output'
+    basic_outpath = File.join destination_path, 'basic.htm'
+    sample_outpath = File.join destination_path, 'sample.htm'
     begin
-      invoke_cli_with_filenames %w(-D test/test_output -a outfilesuffix=.htm), %w(basic.asciidoc sample.asciidoc)
+      invoke_cli_with_filenames %w(-D test/test_output -a outfilesuffix=.htm), %w(basic.adoc sample.adoc)
       assert File.exist?(basic_outpath)
       assert File.exist?(sample_outpath)
     ensure
@@ -379,19 +400,19 @@ context 'Invoker' do
     end
   end
 
-  test 'should render all files that matches a glob expression' do
-    basic_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'basic.html'))
+  test 'should convert all files that matches a glob expression' do
+    basic_outpath = fixture_path 'basic.html'
     begin
-      invoke_cli_to_buffer [], "ba*.asciidoc"
+      invoke_cli_to_buffer [], "ba*.adoc"
       assert File.exist?(basic_outpath)
     ensure
       FileUtils.rm_f(basic_outpath)
     end
   end
 
-  test 'should render all files that matches an absolute path glob expression' do
-    basic_outpath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'basic.html'))
-    glob = File.join(File.expand_path(File.dirname(__FILE__)), 'fixtures', 'ba*.asciidoc')
+  test 'should convert all files that matches an absolute path glob expression' do
+    basic_outpath = fixture_path 'basic.html'
+    glob = fixture_path 'ba*.adoc'
     # test Windows using backslash-style pathname
     if File::ALT_SEPARATOR == '\\'
       glob = glob.tr '/', '\\'
@@ -413,38 +434,38 @@ context 'Invoker' do
   end
 
   test 'should write page for each alternate manname' do
-    outdir = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures'))
+    outdir = fixturedir
     outfile_1 = File.join outdir, 'eve.1'
     outfile_2 = File.join outdir, 'islifeform.1'
-    input = <<-EOS
-= eve(1)
-Andrew Stanton
-v1.0.0
-:doctype: manpage
-:manmanual: EVE
-:mansource: EVE
+    input = <<~'EOS'
+    = eve(1)
+    Andrew Stanton
+    v1.0.0
+    :doctype: manpage
+    :manmanual: EVE
+    :mansource: EVE
 
-== NAME
+    == NAME
 
-eve, islifeform - analyzes an image to determine if it's a picture of a life form
+    eve, islifeform - analyzes an image to determine if it's a picture of a life form
 
-== SYNOPSIS
+    == SYNOPSIS
 
-*eve* ['OPTION']... 'FILE'...
+    *eve* ['OPTION']... 'FILE'...
     EOS
 
     begin
       invoke_cli(%W(-b manpage -o #{outfile_1}), '-') { input }
       assert File.exist?(outfile_1)
       assert File.exist?(outfile_2)
-      assert_equal '.so eve.1', (IO.read outfile_2).chomp
+      assert_equal '.so eve.1', (File.read outfile_2).chomp
     ensure
       FileUtils.rm_f outfile_1
       FileUtils.rm_f outfile_2
     end
   end
 
-  test 'should output a trailing endline to stdout' do
+  test 'should output a trailing newline to stdout' do
     invoker = nil
     output = nil
     redirect_streams do |out, err|
@@ -517,7 +538,7 @@ eve, islifeform - analyzes an image to determine if it's a picture of a life for
   end
 
   test 'should locate custom templates based on template dir, template engine and backend' do
-    custom_backend_root = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'custom-backends'))
+    custom_backend_root = fixture_path 'custom-backends'
     invoker = invoke_cli_to_buffer %W(-E haml -T #{custom_backend_root} -o -)
     doc = invoker.document
     assert_kind_of Asciidoctor::Converter::CompositeConverter, doc.converter
@@ -527,8 +548,8 @@ eve, islifeform - analyzes an image to determine if it's a picture of a life for
   end
 
   test 'should load custom templates from multiple template directories' do
-    custom_backend_1 = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'custom-backends/haml/html5'))
-    custom_backend_2 = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'custom-backends/haml/html5-tweaks'))
+    custom_backend_1 = fixture_path 'custom-backends/haml/html5'
+    custom_backend_2 = fixture_path 'custom-backends/haml/html5-tweaks'
     invoker = invoke_cli_to_buffer %W(-T #{custom_backend_1} -T #{custom_backend_2} -o - -s)
     output = invoker.read_output
     assert_css '.paragraph', output, 0
@@ -618,37 +639,35 @@ eve, islifeform - analyzes an image to determine if it's a picture of a life for
   end
 
   test 'should force default external encoding to UTF-8' do
-    executable = File.expand_path(File.join(File.dirname(__FILE__), '..', 'bin', 'asciidoctor'))
-    input_path = fixture_path 'encoding.asciidoc'
+    ruby = File.join RbConfig::CONFIG['bindir'], RbConfig::CONFIG['ruby_install_name']
+    executable = File.join bindir, 'asciidoctor'
+    input_path = fixture_path 'encoding.adoc'
     old_lang = ENV['LANG']
-    ENV['LANG'] = 'US-ASCII'
     begin
+      ENV['LANG'] = 'US-ASCII'
       # using open3 to work around a bug in JRuby process_manager.rb,
       # which tries to run a gsub on stdout prematurely breaking the test
-      require 'open3'
-      #cmd = "#{executable} -o - --trace #{input_path}"
-      cmd = "#{File.join RbConfig::CONFIG['bindir'], RbConfig::CONFIG['ruby_install_name']} #{executable} -o - --trace #{input_path}"
-      _, out, _ = Open3.popen3 cmd
-      #stderr_lines = stderr.readlines
+      cmd = %(#{ruby} #{executable} -o - --trace #{input_path})
       # warnings may be issued, so don't assert on stderr
-      #assert_empty stderr_lines, 'Command failed. Expected to receive a rendered document.'
-      stdout_lines = out.readlines
+      stdout_lines = Open3.popen3(cmd) {|_, out| out.readlines }
       refute_empty stdout_lines
-      stdout_lines.each {|l| l.force_encoding Encoding::UTF_8 } if Asciidoctor::FORCE_ENCODING
+      stdout_lines.each {|l| l.force_encoding Encoding::UTF_8 } unless stdout_lines[0].encoding == Encoding::UTF_8
       stdout_str = stdout_lines.join
       assert_includes stdout_str, 'Codierungen sind verrückt auf älteren Versionen von Ruby'
     ensure
-      ENV['LANG'] = old_lang
+      if old_lang
+        ENV['LANG'] = old_lang
+      else
+        ENV.delete 'LANG'
+      end
     end
   end
 
   test 'should print timings when -t flag is specified' do
-    input = <<-EOS
-    Sample *AsciiDoc*
-    EOS
+    input = 'Sample *AsciiDoc*'
     invoker = nil
     error = nil
-    redirect_streams do |out, err|
+    redirect_streams do |_, err|
       invoker = invoke_cli(%w(-t -o /dev/null), '-') { input }
       error = err.string
     end
@@ -657,19 +676,65 @@ eve, islifeform - analyzes an image to determine if it's a picture of a life for
     assert_match(/Total time/, error)
   end
 
+  test 'should show timezone as UTC if system TZ is set to UTC' do
+    ruby = File.join RbConfig::CONFIG['bindir'], RbConfig::CONFIG['ruby_install_name']
+    executable = File.join bindir, 'asciidoctor'
+    input_path = fixture_path 'doctime-localtime.adoc'
+    cmd = %(#{ruby} #{executable} -d inline -o - -s #{input_path})
+    old_tz = ENV['TZ']
+    old_source_date_epoch = ENV.delete 'SOURCE_DATE_EPOCH'
+    begin
+      ENV['TZ'] = 'UTC'
+      result = Open3.popen3(cmd) {|_, out| out.read }
+      doctime, localtime = result.lines.map {|l| l.chomp }
+      assert doctime.end_with?(' UTC')
+      assert localtime.end_with?(' UTC')
+    ensure
+      if old_tz
+        ENV['TZ'] = old_tz
+      else
+        ENV.delete 'TZ'
+      end
+      ENV['SOURCE_DATE_EPOCH'] = old_source_date_epoch if old_source_date_epoch
+    end
+  end
+
+  test 'should show timezone as offset if system TZ is not set to UTC' do
+    ruby = File.join RbConfig::CONFIG['bindir'], RbConfig::CONFIG['ruby_install_name']
+    executable = File.join bindir, 'asciidoctor'
+    input_path = fixture_path 'doctime-localtime.adoc'
+    cmd = %(#{ruby} #{executable} -d inline -o - -s #{input_path})
+    old_tz = ENV['TZ']
+    old_source_date_epoch = ENV.delete 'SOURCE_DATE_EPOCH'
+    begin
+      ENV['TZ'] = 'EST+5'
+      result = Open3.popen3(cmd) {|_, out| out.read }
+      doctime, localtime = result.lines.map {|l| l.chomp }
+      assert doctime.end_with?(' -0500')
+      assert localtime.end_with?(' -0500')
+    ensure
+      if old_tz
+        ENV['TZ'] = old_tz
+      else
+        ENV.delete 'TZ'
+      end
+      ENV['SOURCE_DATE_EPOCH'] = old_source_date_epoch if old_source_date_epoch
+    end
+  end
+
   test 'should use SOURCE_DATE_EPOCH as modified time of input file and local time' do
     old_source_date_epoch = ENV.delete 'SOURCE_DATE_EPOCH'
     begin
       ENV['SOURCE_DATE_EPOCH'] = '1234123412'
-      sample_filepath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.asciidoc'))
+      sample_filepath = fixture_path 'sample.adoc'
       invoker = invoke_cli_to_buffer %w(-o /dev/null), sample_filepath
       doc = invoker.document
       assert_equal '2009-02-08', (doc.attr 'docdate')
       assert_equal '2009', (doc.attr 'docyear')
-      assert_match(/2009-02-08 20:03:32 (GMT|UTC)/, (doc.attr 'docdatetime'))
+      assert_match(/2009-02-08 20:03:32 UTC/, (doc.attr 'docdatetime'))
       assert_equal '2009-02-08', (doc.attr 'localdate')
       assert_equal '2009', (doc.attr 'localyear')
-      assert_match(/2009-02-08 20:03:32 (GMT|UTC)/, (doc.attr 'localdatetime'))
+      assert_match(/2009-02-08 20:03:32 UTC/, (doc.attr 'localdatetime'))
     ensure
       if old_source_date_epoch
         ENV['SOURCE_DATE_EPOCH'] = old_source_date_epoch
@@ -683,7 +748,7 @@ eve, islifeform - analyzes an image to determine if it's a picture of a life for
     old_source_date_epoch = ENV.delete 'SOURCE_DATE_EPOCH'
     begin
       ENV['SOURCE_DATE_EPOCH'] = 'aaaaaaaa'
-      sample_filepath = File.expand_path(File.join(File.dirname(__FILE__), 'fixtures', 'sample.asciidoc'))
+      sample_filepath = fixture_path 'sample.adoc'
       assert_equal 1, (invoke_cli_to_buffer %w(-o /dev/null), sample_filepath).code
     ensure
       if old_source_date_epoch

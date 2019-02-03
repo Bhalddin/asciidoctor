@@ -1,4 +1,3 @@
-# encoding: UTF-8
 module Asciidoctor
   module Cli
     # Public Invocation class for starting Asciidoctor via CLI
@@ -30,10 +29,10 @@ module Asciidoctor
       end
 
       def invoke!
-        old_verbose = -1
         return unless @options
 
         old_verbose = $VERBOSE
+        old_logger = old_logger_level = nil
         opts = {}
         infiles = []
         outfile = nil
@@ -66,10 +65,13 @@ module Asciidoctor
             case val
             when 0
               $VERBOSE = nil
+              old_logger = LoggerManager.logger
+              LoggerManager.logger = NullLogger.new
             when 1
               $VERBOSE = false
             when 2
               $VERBOSE = true
+              old_logger_level, LoggerManager.logger.level = LoggerManager.logger.level, ::Logger::Severity::DEBUG
             end
           else
             opts[key] = val unless val.nil?
@@ -98,16 +100,16 @@ module Asciidoctor
         if stdin
           # allows use of block to supply stdin, particularly useful for tests
           input = block_given? ? yield : STDIN
-          input_opts = opts.merge :to_file => tofile
+          input_opts = opts.merge to_file: tofile
           if show_timings
-            @documents << (::Asciidoctor.convert input, (input_opts.merge :timings => (timings = Timings.new)))
+            @documents << (::Asciidoctor.convert input, (input_opts.merge timings: (timings = Timings.new)))
             timings.print_report err, '-'
           else
             @documents << (::Asciidoctor.convert input, input_opts)
           end
         else
           infiles.each do |infile|
-            input_opts = opts.merge :to_file => tofile
+            input_opts = opts.merge to_file: tofile
             if abs_srcdir_posix && (input_opts.key? :to_dir)
               abs_indir = ::File.dirname ::File.expand_path infile
               if non_posix_env
@@ -120,17 +122,18 @@ module Asciidoctor
               end
             end
             if show_timings
-              @documents << (::Asciidoctor.convert_file infile, (input_opts.merge :timings => (timings = Timings.new)))
+              @documents << (::Asciidoctor.convert_file infile, (input_opts.merge timings: (timings = Timings.new)))
               timings.print_report err, infile
             else
               @documents << (::Asciidoctor.convert_file infile, input_opts)
             end
           end
         end
+        @code = 1 if ((logger = LoggerManager.logger).respond_to? :max_severity) && logger.max_severity && logger.max_severity >= opts[:failure_level]
       rescue ::Exception => e
         if ::SignalException === e
           @code = e.signo
-          # add extra endline if Ctrl+C is used
+          # add extra newline if Ctrl+C is used
           err.puts if ::Interrupt === e
         else
           @code = (e.respond_to? :status) ? e.status : 1
@@ -147,7 +150,12 @@ module Asciidoctor
         end
         nil
       ensure
-        $VERBOSE = old_verbose unless old_verbose == -1
+        $VERBOSE = old_verbose
+        if old_logger
+          LoggerManager.logger = old_logger
+        elsif old_logger_level
+          LoggerManager.logger.level = old_logger_level
+        end
       end
 
       def document

@@ -1,4 +1,3 @@
-# encoding: UTF-8
 module Asciidoctor
   module Converter; end # required for Opal
 
@@ -9,11 +8,14 @@ module Asciidoctor
   # Concrete subclasses must implement the {#convert} method and, optionally,
   # the {#convert_with_options} method.
   class Converter::Base
-    include Converter
+    include Converter, Logging
   end
 
   # An abstract base class for built-in {Converter} classes.
+  # Does not inherit from Converter.
   class Converter::BuiltIn
+    include Logging
+
     def initialize backend, opts = {}
     end
 
@@ -21,7 +23,7 @@ module Asciidoctor
     # transform and optionally additional options (when not empty).
     #
     # CAUTION: Method that handles the specified transform *may not* accept the
-    # second argument with additional options, in which case an {ArgumentError}
+    # second argument with additional options, in which case an {::ArgumentError}
     # is raised if the given +opts+ Hash is not nil. The additional options are
     # used in template-based backends to access convert helper methods such as
     # outline.
@@ -29,9 +31,8 @@ module Asciidoctor
     # See {Converter#convert} for more details.
     #
     # Returns the [String] result of conversion
-    def convert node, transform = nil, opts = {}
-      transform ||= node.node_name
-      opts.empty? ? (send transform, node) : (send transform, node, opts)
+    def convert node, transform = nil, opts = nil
+      opts ? (send transform || node.node_name, node, opts) : (send transform || node.node_name, node)
     end
 
     alias handles? respond_to?

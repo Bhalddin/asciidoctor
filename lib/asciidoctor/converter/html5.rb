@@ -1,32 +1,32 @@
-# encoding: UTF-8
 module Asciidoctor
   # A built-in {Converter} implementation that generates HTML 5 output
   # consistent with the html5 backend from AsciiDoc Python.
   class Converter::Html5Converter < Converter::BuiltIn
     (QUOTE_TAGS = {
-      :monospaced  => ['<code>',   '</code>',   true],
-      :emphasis    => ['<em>',     '</em>',     true],
-      :strong      => ['<strong>', '</strong>', true],
-      :double      => ['&#8220;',  '&#8221;',   false],
-      :single      => ['&#8216;',  '&#8217;',   false],
-      :mark        => ['<mark>',   '</mark>',   true],
-      :superscript => ['<sup>',    '</sup>',    true],
-      :subscript   => ['<sub>',    '</sub>',    true],
-      :asciimath   => ['\$',       '\$',        false],
-      :latexmath   => ['\(',       '\)',        false]
+      monospaced:  ['<code>',   '</code>',   true],
+      emphasis:    ['<em>',     '</em>',     true],
+      strong:      ['<strong>', '</strong>', true],
+      double:      ['&#8220;',  '&#8221;',   false],
+      single:      ['&#8216;',  '&#8217;',   false],
+      mark:        ['<mark>',   '</mark>',   true],
+      superscript: ['<sup>',    '</sup>',    true],
+      subscript:   ['<sub>',    '</sub>',    true],
+      asciimath:   ['\$',       '\$',        false],
+      latexmath:   ['\(',       '\)',        false],
       # Opal can't resolve these constants when referenced here
-      #:asciimath   => INLINE_MATH_DELIMITERS[:asciimath] + [false],
-      #:latexmath   => INLINE_MATH_DELIMITERS[:latexmath] + [false]
+      #asciimath:  INLINE_MATH_DELIMITERS[:asciimath] + [false],
+      #latexmath:  INLINE_MATH_DELIMITERS[:latexmath] + [false],
     }).default = ['', '', false]
 
+    DropAnchorRx = /<(?:a[^>+]+|\/a)>/
+    StemBreakRx = / *\\\n(?:\\?\n)*|\n\n+/
     SvgPreambleRx = /\A.*?(?=<svg\b)/m
     SvgStartTagRx = /\A<svg[^>]*>/
     DimensionAttributeRx = /\s(?:width|height|style)=(["']).*?\1/
 
     def initialize backend, opts = {}
       @xml_mode = opts[:htmlsyntax] == 'xml'
-      @void_element_slash = @xml_mode ? '/' : nil
-      @stylesheets = Stylesheets.instance
+      @void_element_slash = @xml_mode ? '/' : ''
     end
 
     def document node
@@ -35,14 +35,14 @@ module Asciidoctor
       unless (asset_uri_scheme = (node.attr 'asset-uri-scheme', 'https')).empty?
         asset_uri_scheme = %(#{asset_uri_scheme}:)
       end
-      cdn_base = %(#{asset_uri_scheme}//cdnjs.cloudflare.com/ajax/libs)
-      linkcss = node.safe >= SafeMode::SECURE || (node.attr? 'linkcss')
+      cdn_base_url = %(#{asset_uri_scheme}//cdnjs.cloudflare.com/ajax/libs)
+      linkcss = node.attr? 'linkcss'
       result = ['<!DOCTYPE html>']
       lang_attribute = (node.attr? 'nolang') ? '' : %( lang="#{node.attr 'lang', 'en'}")
       result << %(<html#{@xml_mode ? ' xmlns="http://www.w3.org/1999/xhtml"' : ''}#{lang_attribute}>)
       result << %(<head>
 <meta charset="#{node.attr 'encoding', 'UTF-8'}"#{slash}>
-<!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"#{slash}><![endif]-->
+<meta http-equiv="X-UA-Compatible" content="IE=edge"#{slash}>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"#{slash}>
 <meta name="generator" content="Asciidoctor #{node.attr 'asciidoctor-version'}"#{slash}>)
       result << %(<meta name="application-name" content="#{node.attr 'app-name'}"#{slash}>) if node.attr? 'app-name'
@@ -54,11 +54,11 @@ module Asciidoctor
         if (icon_href = node.attr 'favicon').empty?
           icon_href, icon_type = 'favicon.ico', 'image/x-icon'
         else
-          icon_type = (icon_ext = ::File.extname icon_href) == '.ico' ? 'image/x-icon' : %(image/#{icon_ext[1..-1]})
+          icon_type = (icon_ext = ::File.extname icon_href) == '.ico' ? 'image/x-icon' : %(image/#{icon_ext.slice 1, icon_ext.length})
         end
-        result << %(<link rel="shortcut icon" type="#{icon_type}" href="#{icon_href}">)
+        result << %(<link rel="icon" type="#{icon_type}" href="#{icon_href}"#{slash}>)
       end
-      result << %(<title>#{node.doctitle :sanitize => true, :use_fallback => true}</title>)
+      result << %(<title>#{node.doctitle sanitize: true, use_fallback: true}</title>)
 
       if DEFAULT_STYLESHEET_KEYS.include?(node.attr 'stylesheet')
         if (webfonts = node.attr 'webfonts')
@@ -67,45 +67,31 @@ module Asciidoctor
         if linkcss
           result << %(<link rel="stylesheet" href="#{node.normalize_web_path DEFAULT_STYLESHEET_NAME, (node.attr 'stylesdir', ''), false}"#{slash}>)
         else
-          result << @stylesheets.embed_primary_stylesheet
+          result << %(<style>
+#{Stylesheets.instance.primary_stylesheet_data}
+</style>)
         end
       elsif node.attr? 'stylesheet'
         if linkcss
           result << %(<link rel="stylesheet" href="#{node.normalize_web_path((node.attr 'stylesheet'), (node.attr 'stylesdir', ''))}"#{slash}>)
         else
           result << %(<style>
-#{node.read_asset node.normalize_system_path((node.attr 'stylesheet'), (node.attr 'stylesdir', '')), :warn_on_failure => true, :label => 'stylesheet'}
+#{node.read_asset node.normalize_system_path((node.attr 'stylesheet'), (node.attr 'stylesdir', '')), warn_on_failure: true, label: 'stylesheet'}
 </style>)
         end
       end
 
       if node.attr? 'icons', 'font'
         if node.attr? 'iconfont-remote'
-          result << %(<link rel="stylesheet" href="#{node.attr 'iconfont-cdn', %[#{cdn_base}/font-awesome/#{FONT_AWESOME_VERSION}/css/font-awesome.min.css]}"#{slash}>)
+          result << %(<link rel="stylesheet" href="#{node.attr 'iconfont-cdn', %[#{cdn_base_url}/font-awesome/#{FONT_AWESOME_VERSION}/css/font-awesome.min.css]}"#{slash}>)
         else
           iconfont_stylesheet = %(#{node.attr 'iconfont-name', 'font-awesome'}.css)
           result << %(<link rel="stylesheet" href="#{node.normalize_web_path iconfont_stylesheet, (node.attr 'stylesdir', ''), false}"#{slash}>)
         end
       end
 
-      case (highlighter = node.attr 'source-highlighter')
-      when 'coderay'
-        if (node.attr 'coderay-css', 'class') == 'class'
-          if linkcss
-            result << %(<link rel="stylesheet" href="#{node.normalize_web_path @stylesheets.coderay_stylesheet_name, (node.attr 'stylesdir', ''), false}"#{slash}>)
-          else
-            result << @stylesheets.embed_coderay_stylesheet
-          end
-        end
-      when 'pygments'
-        if (node.attr 'pygments-css', 'class') == 'class'
-          pygments_style = node.attr 'pygments-style'
-          if linkcss
-            result << %(<link rel="stylesheet" href="#{node.normalize_web_path @stylesheets.pygments_stylesheet_name(pygments_style), (node.attr 'stylesdir', ''), false}"#{slash}>)
-          else
-            result << (@stylesheets.embed_pygments_stylesheet pygments_style)
-          end
-        end
+      if (syntax_hl = node.syntax_highlighter) && (syntax_hl.docinfo? :head)
+        result << (syntax_hl.docinfo :head, node, linkcss: linkcss)
       end
 
       unless (docinfo_content = node.docinfo).empty?
@@ -113,15 +99,16 @@ module Asciidoctor
       end
 
       result << '</head>'
-      body_attrs = []
-      body_attrs << %(id="#{node.id}") if node.id
+      body_attrs = node.id ? [%(id="#{node.id}")] : []
       if (sectioned = node.sections?) && (node.attr? 'toc-class') && (node.attr? 'toc') && (node.attr? 'toc-placement', 'auto')
-        body_attrs << %(class="#{node.doctype} #{node.attr 'toc-class'} toc-#{node.attr 'toc-position', 'header'}")
+        classes = [node.doctype, (node.attr 'toc-class'), %(toc-#{node.attr 'toc-position', 'header'})]
       else
-        body_attrs << %(class="#{node.doctype}")
+        classes = [node.doctype]
       end
+      classes << (node.attr 'docrole') if node.attr? 'docrole'
+      body_attrs << %(class="#{classes.join ' '}")
       body_attrs << %(style="max-width: #{node.attr 'max-width'};") if node.attr? 'max-width'
-      result << %(<body #{body_attrs * ' '}>)
+      result << %(<body #{body_attrs.join ' '}>)
 
       unless node.noheader
         result << '<div id="header">'
@@ -138,19 +125,11 @@ module Asciidoctor
           if node.has_header?
             result << %(<h1>#{node.header.title}</h1>) unless node.notitle
             details = []
-            if node.attr? 'author'
-              details << %(<span id="author" class="author">#{node.attr 'author'}</span>#{br})
-              if node.attr? 'email'
-                details << %(<span id="email" class="email">#{node.sub_macros(node.attr 'email')}</span>#{br})
-              end
-              if (authorcount = (node.attr 'authorcount').to_i) > 1
-                (2..authorcount).each do |idx|
-                  details << %(<span id="author#{idx}" class="author">#{node.attr "author_#{idx}"}</span>#{br})
-                  if node.attr? %(email_#{idx})
-                    details << %(<span id="email#{idx}" class="email">#{node.sub_macros(node.attr "email_#{idx}")}</span>#{br})
-                  end
-                end
-              end
+            idx = 1
+            node.authors.each do |author|
+              details << %(<span id="author#{idx > 1 ? idx : ''}" class="author">#{author.name}</span>#{br})
+              details << %(<span id="email#{idx > 1 ? idx : ''}" class="email">#{node.sub_macros author.email}</span>#{br}) if author.email
+              idx += 1
             end
             if node.attr? 'revnumber'
               details << %(<span id="revnumber">#{((node.attr 'version-label') || '').downcase} #{node.attr 'revnumber'}#{(node.attr? 'revdate') ? ',' : ''}</span>)
@@ -186,7 +165,7 @@ module Asciidoctor
         result << %(<div id="footnotes">
 <hr#{slash}>)
         node.footnotes.each do |footnote|
-          result << %(<div class="footnote" id="_footnote_#{footnote.index}">
+          result << %(<div class="footnote" id="_footnotedef_#{footnote.index}">
 <a href="#_footnoteref_#{footnote.index}">#{footnote.index}</a>. #{footnote.text}
 </div>)
         end
@@ -202,23 +181,11 @@ module Asciidoctor
         result << '</div>'
       end
 
-      unless (docinfo_content = node.docinfo :footer).empty?
-        result << docinfo_content
-      end
-
-      # Load Javascript at the end of body for performance
+      # JavaScript (and auxiliary stylesheets) loaded at the end of body for performance reasons
       # See http://www.html5rocks.com/en/tutorials/speed/script-loading/
-      case highlighter
-      when 'highlightjs', 'highlight.js'
-        highlightjs_path = node.attr 'highlightjsdir', %(#{cdn_base}/highlight.js/9.12.0)
-        result << %(<link rel="stylesheet" href="#{highlightjs_path}/styles/#{node.attr 'highlightjs-theme', 'github'}.min.css"#{slash}>)
-        result << %(<script src="#{highlightjs_path}/highlight.min.js"></script>
-<script>hljs.initHighlighting()</script>)
-      when 'prettify'
-        prettify_path = node.attr 'prettifydir', %(#{cdn_base}/prettify/r298)
-        result << %(<link rel="stylesheet" href="#{prettify_path}/#{node.attr 'prettify-theme', 'prettify'}.min.css"#{slash}>)
-        result << %(<script src="#{prettify_path}/prettify.min.js"></script>
-<script>prettyPrint()</script>)
+
+      if syntax_hl && (syntax_hl.docinfo? :footer)
+        result << (syntax_hl.docinfo :footer, node, cdn_base_url: cdn_base_url, linkcss: linkcss, self_closing_tag_slash: slash)
       end
 
       if node.attr? 'stem'
@@ -241,12 +208,16 @@ MathJax.Hub.Config({
   TeX: {#{eqnums_opt}}
 });
 </script>
-<script src="#{cdn_base}/mathjax/2.6.0/MathJax.js?config=TeX-MML-AM_HTMLorMML"></script>)
+<script src="#{cdn_base_url}/mathjax/#{MATHJAX_VERSION}/MathJax.js?config=TeX-MML-AM_HTMLorMML"></script>)
+      end
+
+      unless (docinfo_content = node.docinfo :footer).empty?
+        result << docinfo_content
       end
 
       result << '</body>'
       result << '</html>'
-      result * LF
+      result.join LF
     end
 
     def embedded node
@@ -278,20 +249,20 @@ MathJax.Hub.Config({
         result << %(<div id="footnotes">
 <hr#{@void_element_slash}>)
         node.footnotes.each do |footnote|
-          result << %(<div class="footnote" id="_footnote_#{footnote.index}">
+          result << %(<div class="footnote" id="_footnotedef_#{footnote.index}">
 <a href="#_footnoteref_#{footnote.index}">#{footnote.index}</a>. #{footnote.text}
 </div>)
         end
         result << '</div>'
       end
 
-      result * LF
+      result.join LF
     end
 
     def outline node, opts = {}
       return unless node.sections?
-      sectnumlevels = opts[:sectnumlevels] || (node.document.attr 'sectnumlevels', 3).to_i
-      toclevels = opts[:toclevels] || (node.document.attr 'toclevels', 2).to_i
+      sectnumlevels = opts[:sectnumlevels] || (node.document.attributes['sectnumlevels'] || 3).to_i
+      toclevels = opts[:toclevels] || (node.document.attributes['toclevels'] || 2).to_i
       sections = node.sections
       # FIXME top level is incorrect if a multipart book starts with a special section defined at level 0
       result = [%(<ul class="sectlevel#{sections[0].level}">)]
@@ -300,11 +271,22 @@ MathJax.Hub.Config({
         if section.caption
           stitle = section.captioned_title
         elsif section.numbered && slevel <= sectnumlevels
-          stitle = %(#{section.sectnum} #{section.title})
+          if slevel < 2 && node.document.doctype == 'book'
+            if section.sectname == 'chapter'
+              stitle =  %(#{(signifier = node.document.attributes['chapter-signifier']) ? "#{signifier} " : ''}#{section.sectnum} #{section.title})
+            elsif section.sectname == 'part'
+              stitle =  %(#{(signifier = node.document.attributes['part-signifier']) ? "#{signifier} " : ''}#{section.sectnum nil, ':'} #{section.title})
+            else
+              stitle = %(#{section.sectnum} #{section.title})
+            end
+          else
+            stitle = %(#{section.sectnum} #{section.title})
+          end
         else
           stitle = section.title
         end
-        if slevel < toclevels && (child_toc_level = outline section, :toclevels => toclevels, :secnumlevels => sectnumlevels)
+        stitle = stitle.gsub DropAnchorRx, '' if stitle.include? '<a'
+        if slevel < toclevels && (child_toc_level = outline section, toclevels: toclevels, sectnumlevels: sectnumlevels)
           result << %(<li><a href="##{section.id}">#{stitle}</a>)
           result << child_toc_level
           result << '</li>'
@@ -313,37 +295,54 @@ MathJax.Hub.Config({
         end
       end
       result << '</ul>'
-      result * LF
+      result.join LF
     end
 
     def section node
-      htag = %(h#{(slevel = node.level) + 1})
-      id_attr = anchor = link_start = link_end = ''
+      doc_attrs = node.document.attributes
+      level = node.level
+      if node.caption
+        title = node.captioned_title
+      elsif node.numbered && level <= (doc_attrs['sectnumlevels'] || 3).to_i
+        if level < 2 && node.document.doctype == 'book'
+          if node.sectname == 'chapter'
+            title = %(#{(signifier = doc_attrs['chapter-signifier']) ? "#{signifier} " : ''}#{node.sectnum} #{node.title})
+          elsif node.sectname == 'part'
+            title = %(#{(signifier = doc_attrs['part-signifier']) ? "#{signifier} " : ''}#{node.sectnum nil, ':'} #{node.title})
+          else
+            title = %(#{node.sectnum} #{node.title})
+          end
+        else
+          title = %(#{node.sectnum} #{node.title})
+        end
+      else
+        title = node.title
+      end
       if node.id
         id_attr = %( id="#{id = node.id}")
-        if (doc = node.document).attr? 'sectanchors'
-          anchor = %(<a class="anchor" href="##{id}"></a>)
-          # possible idea - anchor icons GitHub-style
-          #if doc.attr? 'icons', 'font'
-          #  anchor = %(<a class="anchor" href="##{id}"><i class="fa fa-anchor"></i></a>)
-          #else
-          #  anchor = %(<a class="anchor" href="##{id}"></a>)
-          #end
+        if doc_attrs['sectlinks']
+          title = %(<a class="link" href="##{id}">#{title}</a>)
         end
-        if doc.attr? 'sectlinks'
-          link_start, link_end = %(<a class="link" href="##{id}">), '</a>'
+        if doc_attrs['sectanchors']
+          # QUESTION should we add a font-based icon in anchor if icons=font?
+          if doc_attrs['sectanchors'] == 'after'
+            title = %(#{title}<a class="anchor" href="##{id}"></a>)
+          else
+            title = %(<a class="anchor" href="##{id}"></a>#{title})
+          end
         end
+      else
+        id_attr = ''
       end
-
-      ex_class = (role = node.role) ? %( #{role}) : ''
-      if slevel == 0
-        %(<h1#{id_attr} class="sect0#{ex_class}">#{anchor}#{link_start}#{node.title}#{link_end}</h1>
+      if level == 0
+        %(<h1#{id_attr} class="sect0#{(role = node.role) ? " #{role}" : ''}">#{title}</h1>
 #{node.content})
       else
-        sectnum = node.numbered && !node.caption && slevel <= (node.document.attr 'sectnumlevels', 3).to_i ? %(#{node.sectnum} ) : ''
-        %(<div class="sect#{slevel}#{ex_class}">
-<#{htag}#{id_attr}>#{anchor}#{link_start}#{sectnum}#{node.captioned_title}#{link_end}</#{htag}>
-#{slevel == 1 ? %[<div class="sectionbody">\n#{node.content}\n</div>] : node.content}
+        %(<div class="sect#{level}#{(role = node.role) ? " #{role}" : ''}">
+<h#{level + 1}#{id_attr}>#{title}</h#{level + 1}>
+#{level == 1 ? %[<div class="sectionbody">
+#{node.content}
+</div>] : node.content}
 </div>)
       end
     end
@@ -379,7 +378,7 @@ MathJax.Hub.Config({
       xml = @xml_mode
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = ['audioblock', node.role].compact
-      class_attribute = %( class="#{classes * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
       title_element = node.title? ? %(<div class="title">#{node.title}</div>\n) : ''
       start_t = node.attr 'start', nil, false
       end_t = node.attr 'end', nil, false
@@ -397,7 +396,7 @@ Your browser does not support the audio tag.
       result = []
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = ['colist', node.style, node.role].compact
-      class_attribute = %( class="#{classes * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
 
       result << %(<div#{id_attribute}#{class_attribute}>)
       result << %(<div class="title">#{node.title}</div>) if node.title?
@@ -429,7 +428,7 @@ Your browser does not support the audio tag.
       end
 
       result << '</div>'
-      result * LF
+      result.join LF
     end
 
     def dlist node
@@ -445,7 +444,7 @@ Your browser does not support the audio tag.
         ['dlist', node.style, node.role]
       end.compact
 
-      class_attribute = %( class="#{classes * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
 
       result << %(<div#{id_attribute}#{class_attribute}>)
       result << %(<div class="title">#{node.title}</div>) if node.title?
@@ -512,7 +511,7 @@ Your browser does not support the audio tag.
       end
 
       result << '</div>'
-      result * LF
+      result.join LF
     end
 
     def example node
@@ -530,7 +529,7 @@ Your browser does not support the audio tag.
       tag_name = %(h#{node.level + 1})
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = [node.style, node.role].compact
-      %(<#{tag_name}#{id_attribute} class="#{classes * ' '}">#{node.title}</#{tag_name}>)
+      %(<#{tag_name}#{id_attribute} class="#{classes.join ' '}">#{node.title}</#{tag_name}>)
     end
 
     def image node
@@ -547,19 +546,17 @@ Your browser does not support the audio tag.
         end
       end
       img ||= %(<img src="#{node.image_uri target}" alt="#{encode_quotes node.alt}"#{width_attr}#{height_attr}#{@void_element_slash}>)
-      if node.attr? 'link'
-        window_attr = %( target="#{window = node.attr 'window'}"#{window == '_blank' || (node.option? 'noopener') ? ' rel="noopener"' : ''}) if node.attr? 'window'
-        img = %(<a class="image" href="#{node.attr 'link'}"#{window_attr}>#{img}</a>)
+      if node.attr? 'link', nil, false
+        img = %(<a class="image" href="#{node.attr 'link'}"#{(append_link_constraint_attrs node).join}>#{img}</a>)
       end
       id_attr = node.id ? %( id="#{node.id}") : ''
-      classes = ['imageblock', node.role].compact
-      class_attr = %( class="#{classes * ' '}")
-      styles = []
-      styles << %(text-align: #{node.attr 'align'}) if node.attr? 'align'
-      styles << %(float: #{node.attr 'float'}) if node.attr? 'float'
-      style_attr = styles.empty? ? '' : %( style="#{styles * ';'}")
+      classes = ['imageblock']
+      classes << (node.attr 'float') if node.attr? 'float'
+      classes << %(text-#{node.attr 'align'}) if node.attr? 'align'
+      classes << node.role if node.role
+      class_attr = %( class="#{classes.join ' '}")
       title_el = node.title? ? %(\n<div class="title">#{node.captioned_title}</div>) : ''
-      %(<div#{id_attr}#{class_attr}#{style_attr}>
+      %(<div#{id_attr}#{class_attr}>
 <div class="content">
 #{img}
 </div>#{title_el}
@@ -567,48 +564,28 @@ Your browser does not support the audio tag.
     end
 
     def listing node
-      nowrap = !(node.document.attr? 'prewrap') || (node.option? 'nowrap')
+      nowrap = (node.option? 'nowrap') || !(node.document.attr? 'prewrap')
       if node.style == 'source'
-        if (language = node.attr 'language', nil, false)
-          code_attrs = %( data-lang="#{language}")
+        lang = node.attr 'language', nil, false
+        if (syntax_hl = node.document.syntax_highlighter)
+          opts = syntax_hl.highlight? ? {
+            css_mode: ((doc_attrs = node.document.attributes)[%(#{syntax_hl.name}-css)] || :class).to_sym,
+            style: doc_attrs[%(#{syntax_hl.name}-style)],
+          } : {}
+          opts[:nowrap] = nowrap
         else
-          code_attrs = ''
+          pre_open = %(<pre class="highlight#{nowrap ? ' nowrap' : ''}"><code#{lang ? %[ class="language-#{lang}" data-lang="#{lang}"] : ''}>)
+          pre_close = '</code></pre>'
         end
-        case node.document.attr 'source-highlighter'
-        when 'coderay'
-          pre_class = %( class="CodeRay highlight#{nowrap ? ' nowrap' : ''}")
-        when 'pygments'
-          if (node.document.attr? 'pygments-css', 'inline')
-            @pygments_bg = @stylesheets.pygments_background(node.document.attr 'pygments-style') unless defined? @pygments_bg
-            pre_class = %( class="pygments highlight#{nowrap ? ' nowrap' : ''}" style="background: #{@pygments_bg}")
-          else
-            pre_class = %( class="pygments highlight#{nowrap ? ' nowrap' : ''}")
-          end
-        when 'highlightjs', 'highlight.js'
-          pre_class = %( class="highlightjs highlight#{nowrap ? ' nowrap' : ''}")
-          code_attrs = %( class="language-#{language} hljs"#{code_attrs}) if language
-        when 'prettify'
-          pre_class = %( class="prettyprint highlight#{nowrap ? ' nowrap' : ''}#{(node.attr? 'linenums', nil, false) ? ' linenums' : ''}")
-          code_attrs = %( class="language-#{language}"#{code_attrs}) if language
-        when 'html-pipeline'
-          pre_class = language ? %( lang="#{language}") : ''
-          code_attrs = ''
-        else
-          pre_class = %( class="highlight#{nowrap ? ' nowrap' : ''}")
-          code_attrs = %( class="language-#{language}"#{code_attrs}) if language
-        end
-        pre_start = %(<pre#{pre_class}><code#{code_attrs}>)
-        pre_end = '</code></pre>'
       else
-        pre_start = %(<pre#{nowrap ? ' class="nowrap"' : ''}>)
-        pre_end = '</pre>'
+        pre_open = %(<pre#{nowrap ? ' class="nowrap"' : ''}>)
+        pre_close = '</pre>'
       end
-
       id_attribute = node.id ? %( id="#{node.id}") : ''
       title_element = node.title? ? %(<div class="title">#{node.captioned_title}</div>\n) : ''
       %(<div#{id_attribute} class="listingblock#{(role = node.role) ? " #{role}" : ''}">
 #{title_element}<div class="content">
-#{pre_start}#{node.content}#{pre_end}
+#{syntax_hl ? (syntax_hl.format node, lang, opts) : pre_open + (node.content || '') + pre_close}
 </div>
 </div>)
     end
@@ -627,9 +604,15 @@ Your browser does not support the audio tag.
     def stem node
       id_attribute = node.id ? %( id="#{node.id}") : ''
       title_element = node.title? ? %(<div class="title">#{node.title}</div>\n) : ''
-      open, close = BLOCK_MATH_DELIMITERS[node.style.to_sym]
+      open, close = BLOCK_MATH_DELIMITERS[style = node.style.to_sym]
+      equation = node.content
 
-      unless ((equation = node.content).start_with? open) && (equation.end_with? close)
+      if style == :asciimath && (equation.include? LF)
+        br = %(<br#{@void_element_slash}>#{LF})
+        equation = equation.gsub(StemBreakRx) { %(#{close}#{br * ($&.count LF)}#{open}) }
+      end
+
+      unless (equation.start_with? open) && (equation.end_with? close)
         equation = %(#{open}#{equation}#{close})
       end
 
@@ -644,7 +627,7 @@ Your browser does not support the audio tag.
       result = []
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = ['olist', node.style, node.role].compact
-      class_attribute = %( class="#{classes * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
 
       result << %(<div#{id_attribute}#{class_attribute}>)
       result << %(<div class="title">#{node.title}</div>) if node.title?
@@ -663,13 +646,13 @@ Your browser does not support the audio tag.
 
       result << '</ol>'
       result << '</div>'
-      result * LF
+      result.join LF
     end
 
     def open node
       if (style = node.style) == 'abstract'
         if node.parent == node.document && node.document.doctype == 'book'
-          warn 'asciidoctor: WARNING: abstract block cannot be used in a document without a title when doctype is book. Excluding block content.'
+          logger.warn 'abstract block cannot be used in a document without a title when doctype is book. Excluding block content.'
           ''
         else
           id_attr = node.id ? %( id="#{node.id}") : ''
@@ -681,7 +664,7 @@ Your browser does not support the audio tag.
 </div>)
         end
       elsif style == 'partintro' && (node.level > 0 || node.parent.context != :section || node.document.doctype != 'book')
-        warn 'asciidoctor: ERROR: partintro block can only be used when doctype is book and it\'s a child of a book part. Excluding block content.'
+        logger.error 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
         ''
       else
           id_attr = node.id ? %( id="#{node.id}") : ''
@@ -735,7 +718,7 @@ Your browser does not support the audio tag.
     def quote node
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = ['quoteblock', node.role].compact
-      class_attribute = %( class="#{classes * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
       title_element = node.title? ? %(\n<div class="title">#{node.title}</div>) : ''
       attribution = (node.attr? 'attribution') ? (node.attr 'attribution') : nil
       citetitle = (node.attr? 'citetitle') ? (node.attr 'citetitle') : nil
@@ -772,34 +755,34 @@ Your browser does not support the audio tag.
       result = []
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = ['tableblock', %(frame-#{node.attr 'frame', 'all'}), %(grid-#{node.attr 'grid', 'all'})]
-      styles = []
-      unless (node.option? 'autowidth') && !(node.attr? 'width', nil, false)
-        if node.attr? 'tablepcwidth', 100
-          classes << 'spread'
-        else
-          styles << %(width: #{node.attr 'tablepcwidth'}%;)
-        end
+      if (stripes = node.attr 'stripes')
+        classes << %(stripes-#{stripes})
       end
+      styles = []
+      if (autowidth = node.attributes['autowidth-option']) && !(node.attr? 'width', nil, false)
+        classes << 'fit-content'
+      elsif (tablewidth = node.attr 'tablepcwidth') == 100
+        classes << 'stretch'
+      else
+        styles << %(width: #{tablewidth}%;)
+      end
+      classes << (node.attr 'float') if node.attr? 'float'
       if (role = node.role)
         classes << role
       end
-      class_attribute = %( class="#{classes * ' '}")
-      styles << %(float: #{node.attr 'float'};) if node.attr? 'float'
-      style_attribute = styles.empty? ? '' : %( style="#{styles * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
+      style_attribute = styles.empty? ? '' : %( style="#{styles.join ' '}")
 
       result << %(<table#{id_attribute}#{class_attribute}#{style_attribute}>)
       result << %(<caption class="title">#{node.captioned_title}</caption>) if node.title?
       if (node.attr 'rowcount') > 0
         slash = @void_element_slash
         result << '<colgroup>'
-        if node.option? 'autowidth'
-          tag = %(<col#{slash}>)
-          node.columns.size.times do
-            result << tag
-          end
+        if autowidth
+          result += (Array.new node.columns.size, %(<col#{slash}>))
         else
           node.columns.each do |col|
-            result << %(<col style="width: #{col.attr 'colpcwidth'}%;"#{slash}>)
+            result << (col.attributes['autowidth-option'] ? %(<col#{slash}>) : %(<col style="width: #{col.attr 'colpcwidth'}%;"#{slash}>))
           end
         end
         result << '</colgroup>'
@@ -814,13 +797,13 @@ Your browser does not support the audio tag.
               else
                 case cell.style
                 when :asciidoc
-                  cell_content = %(<div>#{cell.content}</div>)
+                  cell_content = %(<div class="content">#{cell.content}</div>)
                 when :verse
                   cell_content = %(<div class="verse">#{cell.text}</div>)
                 when :literal
                   cell_content = %(<div class="literal"><pre>#{cell.text}</pre></div>)
                 else
-                  cell_content = (cell_content = cell.content).empty? ? '' : %(<p class="tableblock">#{cell_content * '</p>
+                  cell_content = (cell_content = cell.content).empty? ? '' : %(<p class="tableblock">#{cell_content.join '</p>
 <p class="tableblock">'}</p>)
                 end
               end
@@ -838,7 +821,7 @@ Your browser does not support the audio tag.
         end
       end
       result << '</table>'
-      result * LF
+      result.join LF
     end
 
     def toc node
@@ -859,7 +842,7 @@ Your browser does not support the audio tag.
 
       %(<div#{id_attr} class="#{role}">
 <div#{title_id_attr} class="title">#{title}</div>
-#{outline doc, :toclevels => levels}
+#{outline doc, toclevels: levels}
 </div>)
     end
 
@@ -891,7 +874,7 @@ Your browser does not support the audio tag.
       else
         ul_class_attribute = node.style ? %( class="#{node.style}") : ''
       end
-      result << %(<div#{id_attribute} class="#{div_classes * ' '}">)
+      result << %(<div#{id_attribute} class="#{div_classes.join ' '}">)
       result << %(<div class="title">#{node.title}</div>) if node.title?
       result << %(<ul#{ul_class_attribute}>)
 
@@ -908,13 +891,13 @@ Your browser does not support the audio tag.
 
       result << '</ul>'
       result << '</div>'
-      result * LF
+      result.join LF
     end
 
     def verse node
       id_attribute = node.id ? %( id="#{node.id}") : ''
       classes = ['verseblock', node.role].compact
-      class_attribute = %( class="#{classes * ' '}")
+      class_attribute = %( class="#{classes.join ' '}")
       title_element = node.title? ? %(\n<div class="title">#{node.title}</div>) : ''
       attribution = (node.attr? 'attribution') ? (node.attr 'attribution') : nil
       citetitle = (node.attr? 'citetitle') ? (node.attr 'citetitle') : nil
@@ -934,8 +917,11 @@ Your browser does not support the audio tag.
     def video node
       xml = @xml_mode
       id_attribute = node.id ? %( id="#{node.id}") : ''
-      classes = ['videoblock', node.role].compact
-      class_attribute = %( class="#{classes * ' '}")
+      classes = ['videoblock']
+      classes << (node.attr 'float') if node.attr? 'float'
+      classes << %(text-#{node.attr 'align'}) if node.attr? 'align'
+      classes << node.role if node.role
+      class_attribute = %( class="#{classes.join ' '}")
       title_element = node.title? ? %(\n<div class="title">#{node.title}</div>) : ''
       width_attribute = (node.attr? 'width') ? %( width="#{node.attr 'width'}") : ''
       height_attribute = (node.attr? 'height') ? %( height="#{node.attr 'height'}") : ''
@@ -945,17 +931,13 @@ Your browser does not support the audio tag.
           asset_uri_scheme = %(#{asset_uri_scheme}:)
         end
         start_anchor = (node.attr? 'start', nil, false) ? %(#at=#{node.attr 'start'}) : ''
-        delimiter = '?'
-        if node.option? 'autoplay'
-          autoplay_param = %(#{delimiter}autoplay=1)
-          delimiter = '&amp;'
-        else
-          autoplay_param = ''
-        end
-        loop_param = (node.option? 'loop') ? %(#{delimiter}loop=1) : ''
+        delimiter = ['?']
+        autoplay_param = (node.option? 'autoplay') ? %(#{delimiter.pop || '&amp;'}autoplay=1) : ''
+        loop_param = (node.option? 'loop') ? %(#{delimiter.pop || '&amp;'}loop=1) : ''
+        muted_param = (node.option? 'muted') ? %(#{delimiter.pop || '&amp;'}muted=1) : ''
         %(<div#{id_attribute}#{class_attribute}>#{title_element}
 <div class="content">
-<iframe#{width_attribute}#{height_attribute} src="#{asset_uri_scheme}//player.vimeo.com/video/#{node.attr 'target'}#{start_anchor}#{autoplay_param}#{loop_param}" frameborder="0"#{(node.option? 'nofullscreen') ? '' : (append_boolean_attribute 'allowfullscreen', xml)}></iframe>
+<iframe#{width_attribute}#{height_attribute} src="#{asset_uri_scheme}//player.vimeo.com/video/#{node.attr 'target'}#{autoplay_param}#{loop_param}#{muted_param}#{start_anchor}" frameborder="0"#{(node.option? 'nofullscreen') ? '' : (append_boolean_attribute 'allowfullscreen', xml)}></iframe>
 </div>
 </div>)
       when 'youtube'
@@ -968,6 +950,7 @@ Your browser does not support the audio tag.
         end_param = (node.attr? 'end', nil, false) ? %(&amp;end=#{node.attr 'end'}) : ''
         autoplay_param = (node.option? 'autoplay') ? '&amp;autoplay=1' : ''
         loop_param = (has_loop_param = node.option? 'loop') ? '&amp;loop=1' : ''
+        mute_param = (node.option? 'muted') ? '&amp;mute=1' : ''
         controls_param = (node.option? 'nocontrols') ? '&amp;controls=0' : ''
         # cover both ways of controlling fullscreen option
         if node.option? 'nofullscreen'
@@ -999,7 +982,7 @@ Your browser does not support the audio tag.
 
         %(<div#{id_attribute}#{class_attribute}>#{title_element}
 <div class="content">
-<iframe#{width_attribute}#{height_attribute} src="#{asset_uri_scheme}//www.youtube.com/embed/#{target}?rel=#{rel_param_val}#{start_param}#{end_param}#{autoplay_param}#{loop_param}#{controls_param}#{list_param}#{fs_param}#{modest_param}#{theme_param}#{hl_param}" frameborder="0"#{fs_attribute}></iframe>
+<iframe#{width_attribute}#{height_attribute} src="#{asset_uri_scheme}//www.youtube.com/embed/#{target}?rel=#{rel_param_val}#{start_param}#{end_param}#{autoplay_param}#{loop_param}#{mute_param}#{controls_param}#{list_param}#{fs_param}#{modest_param}#{theme_param}#{hl_param}" frameborder="0"#{fs_attribute}></iframe>
 </div>
 </div>)
       else
@@ -1021,29 +1004,34 @@ Your browser does not support the video tag.
     def inline_anchor node
       case node.type
       when :xref
-        unless (text = node.text) || (text = node.attributes['path'])
-          if AbstractNode === (ref = node.document.catalog[:refs][refid = node.attributes['refid']])
-            text = ref.xreftext((@xrefstyle ||= node.document.attributes['xrefstyle'])) || %([#{refid}])
-          else
-            text = %([#{refid}])
+        if (path = node.attributes['path'])
+          attrs = (append_link_constraint_attrs node, node.role ? [%( class="#{node.role}")] : []).join
+          text = node.text || path
+        else
+          attrs = node.role ? %( class="#{node.role}") : ''
+          unless (text = node.text)
+            refid = node.attributes['refid']
+            if AbstractNode === (ref = (@refs ||= node.document.catalog[:refs])[refid])
+              text = (ref.xreftext node.attr('xrefstyle')) || %([#{refid}])
+            else
+              text = %([#{refid}])
+            end
           end
         end
-        %(<a href="#{node.target}">#{text}</a>)
+        %(<a href="#{node.target}"#{attrs}>#{text}</a>)
       when :ref
         %(<a id="#{node.id}"></a>)
       when :link
         attrs = node.id ? [%( id="#{node.id}")] : []
-        if (role = node.role)
-          attrs << %( class="#{role}")
-        end
+        attrs << %( class="#{node.role}") if node.role
         attrs << %( title="#{node.attr 'title'}") if node.attr? 'title', nil, false
-        attrs << %( target="#{window = node.attr 'window'}"#{window == '_blank' || (node.option? 'noopener') ? ' rel="noopener"' : ''}) if node.attr? 'window', nil, false
-        %(<a href="#{node.target}"#{attrs.join}>#{node.text}</a>)
+        %(<a href="#{node.target}"#{(append_link_constraint_attrs node, attrs).join}>#{node.text}</a>)
       when :bibref
         # NOTE technically node.text should be node.reftext, but subs have already been applied to text
         %(<a id="#{node.id}"></a>#{node.text})
       else
-        warn %(asciidoctor: WARNING: unknown anchor type: #{node.type.inspect})
+        logger.warn %(unknown anchor type: #{node.type.inspect})
+        nil
       end
     end
 
@@ -1062,17 +1050,17 @@ Your browser does not support the video tag.
         src = node.icon_uri("callouts/#{node.text}")
         %(<img src="#{src}" alt="#{node.text}"#{@void_element_slash}>)
       else
-        %(<b class="conum">(#{node.text})</b>)
+        %(#{node.attributes['guard']}<b class="conum">(#{node.text})</b>)
       end
     end
 
     def inline_footnote node
       if (index = node.attr 'index', nil, false)
         if node.type == :xref
-          %(<sup class="footnoteref">[<a class="footnote" href="#_footnote_#{index}" title="View footnote.">#{index}</a>]</sup>)
+          %(<sup class="footnoteref">[<a class="footnote" href="#_footnotedef_#{index}" title="View footnote.">#{index}</a>]</sup>)
         else
           id_attr = node.id ? %( id="_footnote_#{node.id}") : ''
-          %(<sup class="footnote"#{id_attr}>[<a id="_footnoteref_#{index}" class="footnote" href="#_footnote_#{index}" title="View footnote.">#{index}</a>]</sup>)
+          %(<sup class="footnote"#{id_attr}>[<a id="_footnoteref_#{index}" class="footnote" href="#_footnotedef_#{index}" title="View footnote.">#{index}</a>]</sup>)
         end
       elsif node.type == :xref
         %(<sup class="footnoteref red" title="Unresolved footnote reference.">[#{node.text}]</sup>)
@@ -1082,7 +1070,7 @@ Your browser does not support the video tag.
     def inline_image node
       if (type = node.type) == 'icon' && (node.document.attr? 'icons', 'font')
         class_attr_val = %(fa fa-#{node.target})
-        {'size' => 'fa-', 'rotate' => 'fa-rotate-', 'flip' => 'fa-flip-'}.each do |key, prefix|
+        { 'size' => 'fa-', 'rotate' => 'fa-rotate-', 'flip' => 'fa-flip-' }.each do |key, prefix|
           class_attr_val = %(#{class_attr_val} #{prefix}#{node.attr key}) if node.attr? key
         end
         title_attr = (node.attr? 'title') ? %( title="#{node.attr 'title'}") : ''
@@ -1103,13 +1091,21 @@ Your browser does not support the video tag.
         end
         img ||= %(<img src="#{type == 'icon' ? (node.icon_uri target) : (node.image_uri target)}" alt="#{encode_quotes node.alt}"#{attrs}#{@void_element_slash}>)
       end
-      if node.attr? 'link'
-        window_attr = %( target="#{window = node.attr 'window'}"#{window == '_blank' || (node.option? 'noopener') ? ' rel="noopener"' : ''}) if node.attr? 'window'
-        img = %(<a class="image" href="#{node.attr 'link'}"#{window_attr}>#{img}</a>)
+      if node.attr? 'link', nil, false
+        img = %(<a class="image" href="#{node.attr 'link'}"#{(append_link_constraint_attrs node).join}>#{img}</a>)
       end
-      class_attr_val = (role = node.role) ? %(#{type} #{role}) : type
-      style_attr = (node.attr? 'float') ? %( style="float: #{node.attr 'float'}") : ''
-      %(<span class="#{class_attr_val}"#{style_attr}>#{img}</span>)
+      if (role = node.role)
+        if node.attr? 'float'
+          class_attr_val = %(#{type} #{node.attr 'float'} #{role})
+        else
+          class_attr_val = %(#{type} #{role})
+        end
+      elsif node.attr? 'float'
+        class_attr_val = %(#{type} #{node.attr 'float'})
+      else
+        class_attr_val = type
+      end
+      %(<span class="#{class_attr_val}">#{img}</span>)
     end
 
     def inline_indexterm node
@@ -1120,7 +1116,7 @@ Your browser does not support the video tag.
       if (keys = node.attr 'keys').size == 1
         %(<kbd>#{keys[0]}</kbd>)
       else
-        %(<span class="keyseq"><kbd>#{keys * '</kbd>+<kbd>'}</kbd></span>)
+        %(<span class="keyseq"><kbd>#{keys.join '</kbd>+<kbd>'}</kbd></span>)
       end
     end
 
@@ -1135,7 +1131,7 @@ Your browser does not support the video tag.
           %(<b class="menuref">#{menu}</b>)
         end
       else
-        %(<span class="menuseq"><b class="menu">#{menu}</b>#{caret}<b class="submenu">#{submenus * submenu_joiner}</b>#{caret}<b class="menuitem">#{node.attr 'menuitem'}</b></span>)
+        %(<span class="menuseq"><b class="menu">#{menu}</b>#{caret}<b class="submenu">#{submenus.join submenu_joiner}</b>#{caret}<b class="menuitem">#{node.attr 'menuitem'}</b></span>)
       end
     end
 
@@ -1154,6 +1150,8 @@ Your browser does not support the video tag.
       end
     end
 
+    private
+
     def append_boolean_attribute name, xml
       xml ? %( #{name}="#{name}") : %( #{name})
     end
@@ -1163,7 +1161,7 @@ Your browser does not support the video tag.
     end
 
     def generate_manname_section node
-      manname_title = (node.attr 'manname-title') || 'Name'
+      manname_title = node.attr 'manname-title', 'Name'
       if (next_section = node.sections[0]) && (next_section_title = next_section.title) == next_section_title.upcase
         manname_title = manname_title.upcase
       end
@@ -1174,8 +1172,19 @@ Your browser does not support the video tag.
 </div>)
     end
 
+    def append_link_constraint_attrs node, attrs = []
+      rel = 'nofollow' if node.option? 'nofollow'
+      if (window = node.attributes['window'])
+        attrs << %( target="#{window}")
+        attrs << (rel ? %( rel="#{rel} noopener") : ' rel="noopener"') if window == '_blank' || (node.option? 'noopener')
+      elsif rel
+        attrs << %( rel="#{rel}")
+      end
+      attrs
+    end
+
     def read_svg_contents node, target
-      if (svg = node.read_contents target, :start => (node.document.attr 'imagesdir'), :normalize => true, :label => 'SVG')
+      if (svg = node.read_contents target, start: (node.document.attr 'imagesdir'), normalize: true, label: 'SVG')
         svg = svg.sub SvgPreambleRx, '' unless svg.start_with? '<svg'
         old_start_tag = new_start_tag = nil
         # NOTE width, height and style attributes are removed if either width or height is specified

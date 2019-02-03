@@ -1,8 +1,4 @@
-# encoding: UTF-8
-unless defined? ASCIIDOCTOR_PROJECT_DIR
-  $: << File.dirname(__FILE__); $:.uniq!
-  require 'test_helper'
-end
+require_relative 'test_helper'
 
 class ExtensionsInitTest < Minitest::Test
   def test_autoload
@@ -104,6 +100,13 @@ class ReplaceTreeTreeProcessor < Asciidoctor::Extensions::TreeProcessor
   end
 end
 
+class SelfSigningTreeProcessor < Asciidoctor::Extensions::TreeProcessor
+  def process document
+    document << (create_paragraph document, self.class.name, {})
+    nil
+  end
+end
+
 class StripAttributesPostprocessor < Asciidoctor::Extensions::Postprocessor
   def process document, output
     output.gsub(/<(\w+).*?>/m, "<\\1>")
@@ -121,7 +124,7 @@ end
 
 class SnippetMacro < Asciidoctor::Extensions::BlockMacroProcessor
   def process parent, target, attributes
-    create_pass_block parent, %(<script src="http://example.com/#{target}.js?_mode=#{attributes['mode']}"></script>), {}, :content_model => :raw
+    create_pass_block parent, %(<script src="http://example.com/#{target}.js?_mode=#{attributes['mode']}"></script>), {}, content_model: :raw
   end
 end
 
@@ -134,30 +137,11 @@ class TemperatureMacro < Asciidoctor::Extensions::InlineMacroProcessor; use_dsl
     c = target.to_f
     case units
     when 'C'
-      %(#{round_with_precision c, precision} &#176;C)
+      %(#{c.round precision} &#176;C)
     when 'F'
-      %(#{round_with_precision c * 1.8 + 32, precision} &#176;F)
+      %(#{(c * 1.8 + 32).round precision} &#176;F)
     else
       raise ::ArgumentError, %(Unknown temperature units: #{units})
-    end
-  end
-
-  if (::Numeric.instance_method :round).arity == 0
-    def round_with_precision value, precision = 0
-      if precision == 0
-        value.round
-      else
-        factor = 10 ** precision
-        if precision < 0
-          (value * factor).round.div factor
-        else
-          (value * factor).round.fdiv factor
-        end
-      end
-    end
-  else
-    def round_with_precision value, precision = 0
-      value.round precision
     end
   end
 end
@@ -191,6 +175,9 @@ def create_cat_in_sink_block_macro
         image_attrs = {}
         unless target.nil_or_empty?
           image_attrs['target'] = %(cat-in-sink-day-#{target}.png)
+        end
+        if (title = attrs.delete 'title')
+          image_attrs['title'] = title
         end
         if (alt = attrs.delete 1)
           image_attrs['alt'] = alt
@@ -314,35 +301,53 @@ context 'Extensions' do
     end
 
     test 'should get class for top-level class name' do
-      clazz = Asciidoctor::Extensions.class_for_name 'String'
+      clazz = Asciidoctor::Helpers.class_for_name 'String'
       refute_nil clazz
       assert_equal String, clazz
     end
 
     test 'should get class for class name in module' do
-      clazz = Asciidoctor::Extensions.class_for_name 'Asciidoctor::Document'
+      clazz = Asciidoctor::Helpers.class_for_name 'Asciidoctor::Document'
       refute_nil clazz
       assert_equal Asciidoctor::Document, clazz
     end
 
     test 'should get class for class name resolved from root' do
-      clazz = Asciidoctor::Extensions.class_for_name '::Asciidoctor::Document'
+      clazz = Asciidoctor::Helpers.class_for_name '::Asciidoctor::Document'
       refute_nil clazz
       assert_equal Asciidoctor::Document, clazz
     end
 
     test 'should raise exception if cannot find class for name' do
       begin
-        Asciidoctor::Extensions.class_for_name 'InvalidModule::InvalidClass'
+        Asciidoctor::Helpers.class_for_name 'InvalidModule::InvalidClass'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
         assert_equal 'Could not resolve class for name: InvalidModule::InvalidClass', e.message
       end
     end
 
+    test 'should raise exception if constant name is invalid' do
+      begin
+        Asciidoctor::Helpers.class_for_name 'foobar'
+        flunk 'Expecting RuntimeError to be raised'
+      rescue NameError => e
+        assert_equal 'Could not resolve class for name: foobar', e.message
+      end
+    end
+
+    test 'should raise exception if class not found in scope' do
+      begin
+        Asciidoctor::Helpers.class_for_name 'Asciidoctor::Extensions::String'
+        flunk 'Expecting RuntimeError to be raised'
+      rescue NameError => e
+        assert_equal 'Could not resolve class for name: Asciidoctor::Extensions::String', e.message
+      end
+    end
+
     test 'should raise exception if name resolves to module' do
       begin
-        Asciidoctor::Extensions.class_for_name 'Asciidoctor::Extensions'
+        Asciidoctor::Helpers.class_for_name 'Asciidoctor::Extensions'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
         assert_equal 'Could not resolve class for name: Asciidoctor::Extensions', e.message
@@ -350,15 +355,38 @@ context 'Extensions' do
     end
 
     test 'should resolve class if class is given' do
-      clazz = Asciidoctor::Extensions.resolve_class Asciidoctor::Document
+      clazz = Asciidoctor::Helpers.resolve_class Asciidoctor::Document
       refute_nil clazz
       assert_equal Asciidoctor::Document, clazz
     end
 
     test 'should resolve class if class from string' do
-      clazz = Asciidoctor::Extensions.resolve_class 'Asciidoctor::Document'
+      clazz = Asciidoctor::Helpers.resolve_class 'Asciidoctor::Document'
       refute_nil clazz
       assert_equal Asciidoctor::Document, clazz
+    end
+
+    test 'should not resolve class if not in scope' do
+      begin
+        Asciidoctor::Helpers.resolve_class 'Asciidoctor::Extensions::String'
+        flunk 'Expecting RuntimeError to be raised'
+      rescue NameError => e
+        assert_equal 'Could not resolve class for name: Asciidoctor::Extensions::String', e.message
+      end
+    end
+
+    test 'should raise NameError if extension class cannot be resolved from string' do
+      begin
+        Asciidoctor::Extensions.register do
+          block 'foobar'
+        end
+        empty_document
+        flunk 'Expecting RuntimeError to be raised'
+      rescue NameError => e
+        assert_equal 'Could not resolve class for name: foobar', e.message
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
     end
 
     test 'should allow standalone registry to be created but not registered' do
@@ -547,7 +575,7 @@ context 'Extensions' do
         tree_processor SampleTreeProcessor
       end
 
-      doc = document_from_string %(= Document Title\n\ncontent), :extension_registry => registry
+      doc = document_from_string %(= Document Title\n\ncontent), extension_registry: registry
       refute_nil doc.extensions
       assert_equal 1, doc.extensions.groups.size
       assert doc.extensions.tree_processors?
@@ -560,7 +588,7 @@ context 'Extensions' do
       registry = Asciidoctor::Extensions.create
       registry.tree_processor SampleTreeProcessor
 
-      doc = document_from_string %(= Document Title\n\ncontent), :extension_registry => registry
+      doc = document_from_string %(= Document Title\n\ncontent), extension_registry: registry
       refute_nil doc.extensions
       assert_equal 0, doc.extensions.groups.size
       assert doc.extensions.tree_processors?
@@ -569,7 +597,7 @@ context 'Extensions' do
     end
 
     test 'can provide extensions proc as option' do
-      doc = document_from_string %(= Document Title\n\ncontent), :extensions => proc {
+      doc = document_from_string %(= Document Title\n\ncontent), extensions: proc {
         tree_processor SampleTreeProcessor
       }
       refute_nil doc.extensions
@@ -580,12 +608,12 @@ context 'Extensions' do
     end
 
     test 'should invoke preprocessors before parsing document' do
-      input = <<-EOS
-junk line
+      input = <<~'EOS'
+      junk line
 
-= Document Title
+      = Document Title
 
-sample content
+      sample content
       EOS
 
       begin
@@ -603,13 +631,13 @@ sample content
       end
     end
 
-    test 'should invoke include processor to process include macro' do
-      input = <<-EOS
-before
+    test 'should invoke include processor to process include directive' do
+      input = <<~'EOS'
+      before
 
-include::lorem-ipsum.txt[]
+      include::lorem-ipsum.txt[]
 
-after
+      after
       EOS
 
       begin
@@ -617,7 +645,8 @@ after
           include_processor BoilerplateTextIncludeProcessor
         end
 
-        result = render_string input, :safe => :server
+        # a custom include processor is not affected by the safe mode
+        result = convert_string input, safe: :secure
         assert_css '.paragraph > p', result, 3
         assert_includes result, 'before'
         assert_includes result, 'Lorem ipsum'
@@ -627,51 +656,70 @@ after
       end
     end
 
-    test 'should call include processor to process include directive' do
-      input = <<-EOS
-first line
+    test 'should invoke include processor if it offers to handle include directive' do
+      input = <<~'EOS'
+      include::skip-me.adoc[]
+      line after skip
 
-include::include-file.asciidoc[]
+      include::include-file.adoc[]
 
-last line
+      include::fixtures/grandchild-include.adoc[]
+
+      last line
       EOS
 
       registry = Asciidoctor::Extensions.create do
         include_processor do
           handles? do |target|
-            target == 'include-file.asciidoc'
+            target == 'skip-me.adoc'
           end
 
           process do |doc, reader, target, attributes|
-            # demonstrate that push_include normalizes endlines
-            content = ["include target:: #{target}\n", "\n", "middle line\n"]
+          end
+        end
+
+        include_processor do
+          handles? do |target|
+            target == 'include-file.adoc'
+          end
+
+          process do |doc, reader, target, attributes|
+            # demonstrates that push_include normalizes newlines
+            content = [
+              %(found include target '#{target}' at line #{reader.cursor_at_prev_line.lineno}\r\n),
+              %(\r\n),
+              %(middle line\r\n)
+            ]
             reader.push_include content, target, target, 1, attributes
           end
         end
       end
-      # Safe Mode is not required here
-      document = empty_document :base_dir => File.expand_path(File.dirname(__FILE__)), :extension_registry => registry
-      reader = Asciidoctor::PreprocessorReader.new document, input, nil, :normalize => true
+      # safe mode only required for built-in include processor
+      document = empty_document base_dir: testdir, extension_registry: registry, safe: :safe
+      reader = Asciidoctor::PreprocessorReader.new document, input, nil, normalize: true
       lines = []
       lines << reader.read_line
+      assert_equal 'line after skip', lines.last
       lines << reader.read_line
       lines << reader.read_line
-      assert_equal 'include target:: include-file.asciidoc', lines.last
-      assert_equal 'include-file.asciidoc: line 2', reader.line_info
+      assert_equal 'found include target \'include-file.adoc\' at line 4', lines.last
+      assert_equal 'include-file.adoc: line 2', reader.line_info
       while reader.has_more_lines?
         lines << reader.read_line
       end
       source = lines * ::Asciidoctor::LF
-      assert_match(/^include target:: include-file.asciidoc$/, source)
+      assert_match(/^found include target 'include-file.adoc' at line 4$/, source)
       assert_match(/^middle line$/, source)
+      assert_match(/^last line of grandchild$/, source)
+      assert_match(/^last line$/, source)
     end
 
     test 'should invoke tree processors after parsing document' do
-      input = <<-EOS
-= Document Title
-Doc Writer
+      input = <<~'EOS'
+      = Document Title
+      Doc Writer
 
-content
+      content
       EOS
 
       begin
@@ -686,12 +734,31 @@ content
       end
     end
 
-    test 'should allow tree processor to replace tree' do
-      input = <<-EOS
-= Original Document
-Doc Writer
+    test 'should set source_location on document before invoking tree processors' do
+      begin
+        Asciidoctor::Extensions.register do
+          tree_processor do
+            process do |doc|
+              para = create_paragraph doc.blocks.last.parent, %(file: #{doc.file}, lineno: #{doc.lineno}), {}
+              doc << para
+            end
+          end
+        end
 
-content
+        sample_doc = fixture_path 'sample.adoc'
+        doc = Asciidoctor.load_file sample_doc, sourcemap: true
+        assert_includes doc.convert, 'file: sample.adoc, lineno: 1'
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should allow tree processor to replace tree' do
+      input = <<~'EOS'
+      = Original Document
+      Doc Writer
+
+      content
       EOS
 
       begin
@@ -707,14 +774,14 @@ content
     end
 
     test 'should honor block title assigned in tree processor' do
-      input = <<-EOS
-= Document Title
-:!example-caption:
+      input = <<~'EOS'
+      = Document Title
+      :!example-caption:
 
-.Old block title
-====
-example block content
-====
+      .Old block title
+      ====
+      example block content
+      ====
       EOS
 
       old_title = nil
@@ -722,7 +789,7 @@ example block content
         Asciidoctor::Extensions.register do
           tree_processor do
             process do |doc|
-              ex = (doc.find_by :context => :example)[0]
+              ex = (doc.find_by context: :example)[0]
               old_title = ex.title
               ex.title = 'New block title'
             end
@@ -731,17 +798,59 @@ example block content
 
         doc = document_from_string input
         assert_equal 'Old block title', old_title
-        assert_equal 'New block title', (doc.find_by :context => :example)[0].title
+        assert_equal 'New block title', (doc.find_by context: :example)[0].title
       ensure
         Asciidoctor::Extensions.unregister_all
       end
     end
 
-    test 'should invoke postprocessors after rendering document' do
-      input = <<-EOS
-* one
-* two
-* three
+    test 'should be able to register preferred tree processor' do
+      begin
+        Asciidoctor::Extensions.register do
+          tree_processor do
+            process do |doc|
+              doc << (create_paragraph doc, 'd', {})
+              nil
+            end
+          end
+
+          tree_processor do
+            prefer
+            process do |doc|
+              doc << (create_paragraph doc, 'c', {})
+              nil
+            end
+          end
+
+          prefer :tree_processor do
+            process do |doc|
+              doc << (create_paragraph doc, 'b', {})
+              nil
+            end
+          end
+
+          prefer tree_processor {
+            process do |doc|
+              doc << (create_paragraph doc, 'a', {})
+              nil
+            end
+          }
+
+          prefer :tree_processor, SelfSigningTreeProcessor
+        end
+
+        (doc = empty_document).convert
+        assert_equal %w(SelfSigningTreeProcessor a b c d), doc.blocks.map {|b| b.lines[0] }
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should invoke postprocessors after converting document' do
+      input = <<~'EOS'
+      * one
+      * two
+      * three
       EOS
 
       begin
@@ -749,7 +858,7 @@ example block content
           postprocessor StripAttributesPostprocessor
         end
 
-        output = render_string input
+        output = convert_string input
         refute_match(/<div class="ulist">/, output)
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -757,9 +866,9 @@ example block content
     end
 
     test 'should invoke processor for custom block' do
-      input = <<-EOS
-[yell]
-Hi there!
+      input = <<~'EOS'
+      [yell]
+      Hi there!
       EOS
 
       begin
@@ -767,7 +876,7 @@ Hi there!
           block UppercaseBlock
         end
 
-        output = render_embedded_string input
+        output = convert_string_to_embedded input
         assert_xpath '//p', output, 1
         assert_xpath '//p[text()="HI THERE!"]', output, 1
       ensure
@@ -775,12 +884,34 @@ Hi there!
       end
     end
 
+    test 'should invoke processor for custom block in an AsciiDoc table cell' do
+      input = <<~'EOS'
+      |===
+      a|
+      [yell]
+      Hi there!
+      |===
+      EOS
+
+      begin
+        Asciidoctor::Extensions.register do
+          block UppercaseBlock
+        end
+
+        output = convert_string_to_embedded input
+        assert_xpath '/table//p', output, 1
+        assert_xpath '/table//p[text()="HI THERE!"]', output, 1
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
     test 'should pass cloaked context in attributes passed to process method of custom block' do
-      input = <<-EOS
-[custom]
-****
-sidebar
-****
+      input = <<~'EOS'
+      [custom]
+      ****
+      sidebar
+      ****
       EOS
 
       cloaked_context = nil
@@ -795,7 +926,7 @@ sidebar
           end
         end
 
-        render_embedded_string input
+        convert_string_to_embedded input
         assert_equal :sidebar, cloaked_context
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -803,8 +934,41 @@ sidebar
     end
 
     test 'should invoke processor for custom block macro' do
-      input = <<-EOS
-snippet::12345[mode=edit]
+      input = 'snippet::12345[mode=edit]'
+
+      begin
+        Asciidoctor::Extensions.register do
+          block_macro SnippetMacro, :snippet
+        end
+
+        output = convert_string_to_embedded input
+        assert_includes output, '<script src="http://example.com/12345.js?_mode=edit"></script>'
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should substitute attributes in target of custom block macro' do
+      input = 'snippet::{gist-id}[mode=edit]'
+
+      begin
+        Asciidoctor::Extensions.register do
+          block_macro SnippetMacro, :snippet
+        end
+
+        output = convert_string_to_embedded input, attributes: { 'gist-id' => '12345' }
+        assert_includes output, '<script src="http://example.com/12345.js?_mode=edit"></script>'
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should drop block macro line if target references missing attribute and attribute-missing is drop-line' do
+      input = <<~EOS
+      [.rolename]
+      snippet::{gist-ns}12345[mode=edit]
+
+      following paragraph
       EOS
 
       begin
@@ -812,34 +976,117 @@ snippet::12345[mode=edit]
           block_macro SnippetMacro, :snippet
         end
 
-        output = render_embedded_string input
-        assert_includes output, '<script src="http://example.com/12345.js?_mode=edit"></script>'
+        doc, output = nil, nil
+        using_memory_logger do |logger|
+          doc = document_from_string input, attributes: { 'attribute-missing' => 'drop-line' }
+          assert_equal 1, doc.blocks.size
+          assert_equal :paragraph, doc.blocks[0].context
+          output = doc.convert
+          assert_message logger, :WARN, 'dropping line containing reference to missing attribute: gist-ns'
+        end
+        assert_css '.paragraph', output, 1
+        assert_css '.rolename', output, 0
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should invoke processor for custom block macro in an AsciiDoc table cell' do
+      input = <<~'EOS'
+      |===
+      a|message::hi[]
+      |===
+      EOS
+
+      begin
+        Asciidoctor::Extensions.register do
+          block_macro :message do
+            process do |parent, target, attrs|
+              create_paragraph parent, target.upcase, {}
+            end
+          end
+        end
+
+        output = convert_string_to_embedded input
+        assert_xpath '/table//p[text()="HI"]', output, 1
       ensure
         Asciidoctor::Extensions.unregister_all
       end
     end
 
     test 'should match short form of block macro' do
-      input = <<-EOS
-custom_toc::[]
-      EOS
+      input = 'custom-toc::[]'
 
       resolved_target = nil
 
       begin
         Asciidoctor::Extensions.register do
           block_macro do
-            named :custom_toc
+            named 'custom-toc'
             process do |parent, target, attrs|
               resolved_target = target
-              create_pass_block parent, '<!-- custom toc goes here -->', {}, :content_model => :raw
+              create_pass_block parent, '<!-- custom toc goes here -->', {}, content_model: :raw
             end
           end
         end
 
-        output = render_embedded_string input
+        output = convert_string_to_embedded input
         assert_equal '<!-- custom toc goes here -->', output
         assert_equal '', resolved_target
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should fail to convert if name of block macro is illegal' do
+      input = 'illegal name::target[]'
+
+      begin
+        Asciidoctor::Extensions.register do
+          block_macro do
+            named 'illegal name'
+            process do |parent, target, attrs|
+              nil
+            end
+          end
+        end
+
+        assert_raises ArgumentError do
+          convert_string_to_embedded input
+        end
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should be able to set header attribute in block macro processor' do
+      begin
+        Asciidoctor::Extensions.register do
+          block_macro do
+            named :attribute
+            resolves_attributes '1:value'
+            process do |parent, target, attrs|
+              parent.document.set_attr target, attrs['value']
+              nil
+            end
+          end
+          block_macro do
+            named :header_attribute
+            resolves_attributes '1:value'
+            process do |parent, target, attrs|
+              parent.document.set_header_attribute target, attrs['value']
+              nil
+            end
+          end
+        end
+        input = <<~'EOS'
+        attribute::yin[yang]
+
+        header_attribute::foo[bar]
+        EOS
+        doc = document_from_string input
+        assert_nil doc.attr 'yin'
+        assert_equal 'bar', (doc.attr 'foo')
       ensure
         Asciidoctor::Extensions.unregister_all
       end
@@ -851,10 +1098,10 @@ custom_toc::[]
           inline_macro TemperatureMacro, :deg
         end
 
-        output = render_embedded_string 'Room temperature is deg:25[C,precision=0].', :attributes => { 'temperature-unit' => 'F' }
+        output = convert_string_to_embedded 'Room temperature is deg:25[C,precision=0].', attributes: { 'temperature-unit' => 'F' }
         assert_includes output, 'Room temperature is 25 &#176;C.'
 
-        output = render_embedded_string 'Normal body temperature is deg:37[].', :attributes => { 'temperature-unit' => 'F' }
+        output = convert_string_to_embedded 'Normal body temperature is deg:37[].', attributes: { 'temperature-unit' => 'F' }
         assert_includes output, 'Normal body temperature is 98.6 &#176;F.'
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -874,7 +1121,7 @@ custom_toc::[]
           end
         end
 
-        output = render_embedded_string 'label:[Checkbox]'
+        output = convert_string_to_embedded 'label:[Checkbox]'
         assert_includes output, '<label>Checkbox</label>'
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -903,7 +1150,7 @@ custom_toc::[]
           end
 
           inline_macro do
-            named :full_attributes
+            named :'full-attributes'
             resolves_attributes '1:name' => nil
             process do |parent, target, attrs|
               %(target=#{target.inspect}, attributes=#{attrs.sort_by {|k, _| k.to_s }.inspect})
@@ -911,7 +1158,7 @@ custom_toc::[]
           end
 
           inline_macro do
-            named :full_text
+            named :'full-text'
             resolves_attributes false
             process do |parent, target, attrs|
               %(target=#{target.inspect}, attributes=#{attrs.sort_by {|k, _| k.to_s }.inspect})
@@ -928,32 +1175,32 @@ custom_toc::[]
           end
         end
 
-        input = <<-EOS
-[subs=normal]
-++++
-short_attributes:[]
-short_attributes:[value,key=val]
-short_text:[]
-short_text:[[text\\]]
-full_attributes:target[]
-full_attributes:target[value,key=val]
-full_text:target[]
-full_text:target[[text\\]]
-@target
-++++
+        input = <<~'EOS'
+        [subs=normal]
+        ++++
+        short_attributes:[]
+        short_attributes:[value,key=val]
+        short_text:[]
+        short_text:[[text\]]
+        full-attributes:target[]
+        full-attributes:target[value,key=val]
+        full-text:target[]
+        full-text:target[[text\]]
+        @target
+        ++++
         EOS
-        expected = <<-EOS.chomp
-target="", attributes=[]
-target="value,key=val", attributes=[[1, "value"], ["key", "val"], ["name", "value"]]
-target="", attributes=[["text", ""]]
-target="[text]", attributes=[["text", "[text]"]]
-target="target", attributes=[]
-target="target", attributes=[[1, "value"], ["key", "val"], ["name", "value"]]
-target="target", attributes=[["text", ""]]
-target="target", attributes=[["text", "[text]"]]
-target="target", attributes=[]
+        expected = <<~'EOS'.chomp
+        target="", attributes=[]
+        target="value,key=val", attributes=[[1, "value"], ["key", "val"], ["name", "value"]]
+        target="", attributes=[["text", ""]]
+        target="[text]", attributes=[["text", "[text]"]]
+        target="target", attributes=[]
+        target="target", attributes=[[1, "value"], ["key", "val"], ["name", "value"]]
+        target="target", attributes=[["text", ""]]
+        target="target", attributes=[["text", "[text]"]]
+        target="target", attributes=[]
         EOS
-        output = render_embedded_string input
+        output = convert_string_to_embedded input
         assert_equal expected, output
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -970,12 +1217,12 @@ target="target", attributes=[]
               if (text = attrs['text']).empty?
                 text = %(@#{target})
               end
-              create_anchor parent, text, :type => :link, :target => %(https://github.com/#{target})
+              create_anchor parent, text, type: :link, target: %(https://github.com/#{target})
             end
           end
         end
 
-        output = render_embedded_string 'mention:mojavelinux[Dan]'
+        output = convert_string_to_embedded 'mention:mojavelinux[Dan]'
         assert_includes output, '<a href="https://github.com/mojavelinux">Dan</a>'
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -986,7 +1233,7 @@ target="target", attributes=[]
       begin
         Asciidoctor::Extensions.register do
           block do
-            named :skipme
+            named 'skip-me'
             on_context :paragraph
             parses_content_as :raw
             process do |parent, reader, attrs|
@@ -994,14 +1241,14 @@ target="target", attributes=[]
             end
           end
         end
-        input = <<-EOS
-.unused title
-[skipme]
-not rendered
+        input = <<~'EOS'
+        .unused title
+        [skip-me]
+        not shown
 
---
-rendered
---
+        --
+        shown
+        --
         EOS
         doc = document_from_string input
         assert_equal 1, doc.blocks.size
@@ -1025,14 +1272,14 @@ rendered
             end
           end
         end
-        input = <<-EOS
-.unused title
-[ignore]
-not rendered
+        input = <<~'EOS'
+        .unused title
+        [ignore]
+        not shown
 
---
-rendered
---
+        --
+        shown
+        --
         EOS
         doc = document_from_string input
         refute process_method_called
@@ -1057,10 +1304,10 @@ rendered
             end
           end
         end
-        input = <<-EOS
-.title
-[foo]
-content
+        input = <<~'EOS'
+        .title
+        [foo]
+        content
         EOS
         doc = document_from_string input
         assert_equal 1, doc.blocks.size
@@ -1083,19 +1330,19 @@ content
             end
           end
         end
-        input = <<-EOS
-[wrap]
---
-[foo=bar]
-====
-content
-====
+        input = <<~'EOS'
+        [wrap]
+        --
+        [foo=bar]
+        ====
+        content
+        ====
 
-[baz=qux]
-====
-content
-====
---
+        [baz=qux]
+        ====
+        content
+        ====
+        --
         EOS
         doc = document_from_string input
         assert_equal 1, doc.blocks.size
@@ -1116,34 +1363,37 @@ content
           block_macro do
             named :sect
             process do |parent, target, attrs|
-              opts = (level = attrs.delete 'level') ? { :level => level.to_i } : {}
+              opts = (level = attrs.delete 'level') ? { level: level.to_i } : {}
               attrs['id'] = false if attrs['id'] == 'false'
+              parent = parent.parent if parent.context == :preamble
               sect = create_section parent, 'Section Title', attrs, opts
               nil
             end
           end
         end
 
-        input_tpl = <<-EOS
-= Document Title
-:doctype: book
-:sectnums:
+        input_tpl = <<~'EOS'
+        = Document Title
+        :doctype: book
+        :sectnums:
 
-sect::[%s]
+        sect::[%s]
         EOS
 
         {
           ''                       => ['chapter',  1, false, true, '_section_title'],
           'level=0'                => ['part',     0, false, false, '_section_title'],
+          'level=0,alt'            => ['part',     0, false, true, '_section_title', { 'partnums' => '' }],
           'level=0,style=appendix' => ['appendix', 1, true,  true, '_section_title'],
           'style=appendix'         => ['appendix', 1, true,  true, '_section_title'],
           'style=glossary'         => ['glossary', 1, true,  false, '_section_title'],
+          'style=glossary,alt'     => ['glossary', 1, true,  :chapter, '_section_title', { 'sectnums' => 'all' }],
           'style=abstract'         => ['chapter',  1, false, true, '_section_title'],
           'id=section-title'       => ['chapter',  1, false, true, 'section-title'],
           'id=false'               => ['chapter',  1, false, true, nil]
-        }.each do |attrlist, (expect_sectname, expect_level, expect_special, expect_numbered, expect_id)|
+        }.each do |attrlist, (expect_sectname, expect_level, expect_special, expect_numbered, expect_id, extra_attrs)|
           input = input_tpl % attrlist
-          document_from_string input, :safe => :server
+          document_from_string input, safe: :server, attributes: extra_attrs
           assert_equal expect_sectname, sect.sectname
           assert_equal expect_level, sect.level
           assert_equal expect_special, sect.special
@@ -1160,10 +1410,10 @@ sect::[%s]
     end
 
     test 'should add docinfo to document' do
-      input = <<-EOS
-= Document Title
+      input = <<~'EOS'
+      = Document Title
 
-sample content
+      sample content
       EOS
 
       begin
@@ -1171,25 +1421,25 @@ sample content
           docinfo_processor MetaRobotsDocinfoProcessor
         end
 
-        doc = document_from_string input, :safe => :server
+        doc = document_from_string input
+        assert_equal Asciidoctor::SafeMode::SECURE, doc.safe
         assert_equal '<meta name="robots" content="index,follow">', doc.docinfo
       ensure
         Asciidoctor::Extensions.unregister_all
       end
     end
 
-
     test 'should add multiple docinfo to document' do
-      input = <<-EOS
-= Document Title
+      input = <<~'EOS'
+      = Document Title
 
-sample content
+      sample content
       EOS
 
       begin
         Asciidoctor::Extensions.register do
           docinfo_processor MetaAppDocinfoProcessor
-          docinfo_processor MetaRobotsDocinfoProcessor, :position => :>>
+          docinfo_processor MetaRobotsDocinfoProcessor, position: :>>
           docinfo_processor do
             at_location :footer
             process do |doc|
@@ -1198,9 +1448,8 @@ sample content
           end
         end
 
-        doc = document_from_string input, :safe => :server
-        assert_equal '<meta name="robots" content="index,follow">
-<meta name="application-name" content="Asciidoctor App">', doc.docinfo
+        doc = document_from_string input, safe: :server
+        assert_equal %(<meta name="robots" content="index,follow">\n<meta name="application-name" content="Asciidoctor App">), doc.docinfo
         assert_equal '<script><!-- analytics code --></script>', doc.docinfo(:footer)
       ensure
         Asciidoctor::Extensions.unregister_all
@@ -1212,12 +1461,12 @@ sample content
         Asciidoctor::Extensions.register do
           docinfo_processor MetaRobotsDocinfoProcessor
         end
-        sample_input_path = fixture_path('basic.asciidoc')
+        sample_input_path = fixture_path('basic.adoc')
 
-        output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-                                          :header_footer => true,
-                                          :safe => Asciidoctor::SafeMode::SERVER,
-                                          :attributes => {'docinfo' => ''}
+        output = Asciidoctor.convert_file sample_input_path, to_file: false,
+                                          header_footer: true,
+                                          safe: Asciidoctor::SafeMode::SERVER,
+                                          attributes: { 'docinfo' => '' }
         refute_empty output
         assert_css 'script[src="modernizr.js"]', output, 1
         assert_css 'meta[name="robots"]', output, 1
@@ -1227,23 +1476,36 @@ sample content
       end
     end
 
+    test 'should return extension instance after registering' do
+      begin
+        exts = []
+        Asciidoctor::Extensions.register do
+          exts.push preprocessor SamplePreprocessor
+          exts.push include_processor SampleIncludeProcessor
+          exts.push tree_processor SampleTreeProcessor
+          exts.push docinfo_processor SampleDocinfoProcessor
+          exts.push postprocessor SamplePostprocessor
+        end
+        empty_document
+        exts.each do |ext|
+          assert_kind_of Asciidoctor::Extensions::ProcessorExtension, ext
+        end
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
     test 'should raise an exception if mandatory target attribute is not provided for image block' do
-      input = <<-EOS
-.Cat in Sink?
-cat_in_sink::[]
-      EOS
+      input = 'cat_in_sink::[]'
       exception = assert_raises ArgumentError do
-        render_embedded_string input, :extension_registry => create_cat_in_sink_block_macro
+        convert_string_to_embedded input, extension_registry: create_cat_in_sink_block_macro
       end
       assert_match(/target attribute is required/, exception.message)
     end
 
     test 'should assign alt attribute to image block if alt is not provided' do
-      input = <<-EOS
-.Cat in Sink?
-cat_in_sink::25[]
-      EOS
-      doc = document_from_string input, :header_footer => false, :extension_registry => create_cat_in_sink_block_macro
+      input = 'cat_in_sink::25[]'
+      doc = document_from_string input, header_footer: false, extension_registry: create_cat_in_sink_block_macro
       image = doc.blocks[0]
       assert_equal 'cat in sink day 25', (image.attr 'alt')
       assert_equal 'cat in sink day 25', (image.attr 'default-alt')
@@ -1252,16 +1514,30 @@ cat_in_sink::25[]
     end
 
     test 'should create an image block if mandatory attributes are provided' do
-      input = <<-EOS
-.Cat in Sink?
-cat_in_sink::30[cat in sink (yes)]
-      EOS
-      doc = document_from_string input, :header_footer => false, :extension_registry => create_cat_in_sink_block_macro
+      input = 'cat_in_sink::30[cat in sink (yes)]'
+      doc = document_from_string input, header_footer: false, extension_registry: create_cat_in_sink_block_macro
       image = doc.blocks[0]
       assert_equal 'cat in sink (yes)', (image.attr 'alt')
       refute(image.attr? 'default-alt')
       output = doc.convert
       assert_includes output, '<img src="cat-in-sink-day-30.png" alt="cat in sink (yes)">'
+    end
+
+    test 'should not assign caption on image block if title is not set on custom block macro' do
+      input = 'cat_in_sink::30[]'
+      doc = document_from_string input, header_footer: false, extension_registry: create_cat_in_sink_block_macro
+      output = doc.convert
+      assert_xpath '/*[@class="imageblock"]/*[@class="title"]', output, 0
+    end
+
+    test 'should assign caption on image block if title is set on custom block macro' do
+      input = <<~'EOS'
+      .Cat in Sink?
+      cat_in_sink::30[]
+      EOS
+      doc = document_from_string input, header_footer: false, extension_registry: create_cat_in_sink_block_macro
+      output = doc.convert
+      assert_xpath '/*[@class="imageblock"]/*[@class="title"][text()="Figure 1. Cat in Sink?"]', output, 1
     end
   end
 end

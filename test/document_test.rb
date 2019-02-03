@@ -1,8 +1,4 @@
-# encoding: UTF-8
-unless defined? ASCIIDOCTOR_PROJECT_DIR
-  $: << File.dirname(__FILE__); $:.uniq!
-  require 'test_helper'
-end
+require_relative 'test_helper'
 
 BUILT_IN_ELEMENTS = %w(admonition audio colist dlist document embedded example floating_title image inline_anchor inline_break inline_button inline_callout inline_footnote inline_image inline_indexterm inline_kbd inline_menu inline_quoted listing literal stem olist open page_break paragraph pass preamble quote section sidebar table thematic_break toc ulist verse video)
 
@@ -33,26 +29,26 @@ context 'Document' do
     end
 
     test 'safe mode level set using string' do
-      doc = empty_document :safe => 'server'
+      doc = empty_document safe: 'server'
       assert_equal Asciidoctor::SafeMode::SERVER, doc.safe
 
-      doc = empty_document :safe => 'foo'
+      doc = empty_document safe: 'foo'
       assert_equal Asciidoctor::SafeMode::SECURE, doc.safe
     end
 
     test 'safe mode level set using symbol' do
-      doc = empty_document :safe => :server
+      doc = empty_document safe: :server
       assert_equal Asciidoctor::SafeMode::SERVER, doc.safe
 
-      doc = empty_document :safe => :foo
+      doc = empty_document safe: :foo
       assert_equal Asciidoctor::SafeMode::SECURE, doc.safe
     end
 
     test 'safe mode level set using integer' do
-      doc = empty_document :safe => 10
+      doc = empty_document safe: 10
       assert_equal Asciidoctor::SafeMode::SERVER, doc.safe
 
-      doc = empty_document :safe => 100
+      doc = empty_document safe: 100
       assert_equal 100, doc.safe
     end
 
@@ -67,7 +63,7 @@ context 'Document' do
     end
 
     test 'safe mode level can be set in the constructor' do
-      doc = Asciidoctor::Document.new [], :safe => Asciidoctor::SafeMode::SAFE
+      doc = Asciidoctor::Document.new [], safe: Asciidoctor::SafeMode::SAFE
       assert_equal Asciidoctor::SafeMode::SAFE, doc.safe
     end
 
@@ -81,7 +77,7 @@ context 'Document' do
     end
 
     test 'toc and sectnums should be enabled by default for DocBook backend' do
-      doc = document_from_string 'content', :backend => 'docbook', :parse => true
+      doc = document_from_string 'content', backend: 'docbook', parse: true
       assert doc.attr?('toc')
       assert doc.attr?('sectnums')
       result = doc.convert
@@ -90,7 +86,7 @@ context 'Document' do
     end
 
     test 'maxdepth attribute should be set on asciidoc-toc and asciidoc-numbered processing instructions in DocBook backend' do
-      doc = document_from_string 'content', :backend => 'docbook', :parse => true, :attributes => {'toclevels' => '1', 'sectnumlevels' => '1' }
+      doc = document_from_string 'content', backend: 'docbook', parse: true, attributes: { 'toclevels' => '1', 'sectnumlevels' => '1' }
       assert doc.attr?('toc')
       assert doc.attr?('sectnums')
       result = doc.convert
@@ -104,7 +100,7 @@ context 'Document' do
 :toc!:
 :sectnums!:
       EOS
-      doc = document_from_string input, :backend => 'docbook'
+      doc = document_from_string input, backend: 'docbook'
       refute doc.attr?('toc')
       refute doc.attr?('sectnums')
     end
@@ -116,7 +112,7 @@ context 'Document' do
 
 content
       EOS
-      result = render_string input, :backend => 'docbook'
+      result = convert_string input, backend: 'docbook'
       assert_xpath '/article', result, 1
       assert_xpath '/article/info', result, 0
     end
@@ -126,33 +122,33 @@ content
 = Document Title
 :numbered!:
       EOS
-      doc = document_from_string input, :backend => 'docbook'
+      doc = document_from_string input, backend: 'docbook'
       refute doc.attr?('sectnums')
     end
   end
 
   context 'Docinfo files' do
     test 'should include docinfo files for html backend' do
-      sample_input_path = fixture_path('basic.asciidoc')
+      sample_input_path = fixture_path('basic.adoc')
 
       cases = {
-        'docinfo'                => { :head_script => 1, :meta => 0, :top_link => 0, :footer_script => 1 },
-        'docinfo=private'        => { :head_script => 1, :meta => 0, :top_link => 0, :footer_script => 1 },
-        'docinfo1'               => { :head_script => 0, :meta => 1, :top_link => 1, :footer_script => 0 },
-        'docinfo=shared'         => { :head_script => 0, :meta => 1, :top_link => 1, :footer_script => 0 },
-        'docinfo2'               => { :head_script => 1, :meta => 1, :top_link => 1, :footer_script => 1 },
-        'docinfo docinfo2'       => { :head_script => 1, :meta => 1, :top_link => 1, :footer_script => 1 },
-        'docinfo=private,shared' => { :head_script => 1, :meta => 1, :top_link => 1, :footer_script => 1 },
-        'docinfo=private-head'   => { :head_script => 1, :meta => 0, :top_link => 0, :footer_script => 0 },
-        'docinfo=shared-head'    => { :head_script => 0, :meta => 1, :top_link => 0, :footer_script => 0 },
-        'docinfo=private-footer' => { :head_script => 0, :meta => 0, :top_link => 0, :footer_script => 1 },
-        'docinfo=shared-footer'  => { :head_script => 0, :meta => 0, :top_link => 1, :footer_script => 0 },
-        'docinfo=private-head\ ,\ shared-footer' => { :head_script => 1, :meta => 0, :top_link => 1, :footer_script => 0 }
+        'docinfo'                => { head_script: 1, meta: 0, top_link: 0, footer_script: 1 },
+        'docinfo=private'        => { head_script: 1, meta: 0, top_link: 0, footer_script: 1 },
+        'docinfo1'               => { head_script: 0, meta: 1, top_link: 1, footer_script: 0 },
+        'docinfo=shared'         => { head_script: 0, meta: 1, top_link: 1, footer_script: 0 },
+        'docinfo2'               => { head_script: 1, meta: 1, top_link: 1, footer_script: 1 },
+        'docinfo docinfo2'       => { head_script: 1, meta: 1, top_link: 1, footer_script: 1 },
+        'docinfo=private,shared' => { head_script: 1, meta: 1, top_link: 1, footer_script: 1 },
+        'docinfo=private-head'   => { head_script: 1, meta: 0, top_link: 0, footer_script: 0 },
+        'docinfo=shared-head'    => { head_script: 0, meta: 1, top_link: 0, footer_script: 0 },
+        'docinfo=private-footer' => { head_script: 0, meta: 0, top_link: 0, footer_script: 1 },
+        'docinfo=shared-footer'  => { head_script: 0, meta: 0, top_link: 1, footer_script: 0 },
+        'docinfo=private-head\ ,\ shared-footer' => { head_script: 1, meta: 0, top_link: 1, footer_script: 0 },
       }
 
       cases.each do |attr_val, markup|
-        output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-            :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => %(linkcss copycss! #{attr_val})
+        output = Asciidoctor.convert_file sample_input_path, to_file: false,
+            header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: %(linkcss copycss! #{attr_val})
         refute_empty output
         assert_css 'script[src="modernizr.js"]', output, markup[:head_script]
         assert_css 'meta[http-equiv="imagetoolbar"]', output, markup[:meta]
@@ -162,52 +158,63 @@ content
     end
 
     test 'should include docinfo footer even if nofooter attribute is set' do
-      sample_input_path = fixture_path('basic.asciidoc')
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo1' => '', 'nofooter' => ''}
+      sample_input_path = fixture_path('basic.adoc')
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo1' => '', 'nofooter' => '' }
       refute_empty output
       assert_css 'body > a#top', output, 1
     end
 
-    test 'should include docinfo files for html backend with custom docinfodir' do
-      sample_input_path = fixture_path('basic.asciidoc')
+    test 'should include user docinfo after built-in docinfo' do
+      sample_input_path = fixture_path 'basic.adoc'
+      attrs = { 'docinfo' => 'shared', 'source-highlighter' => 'highlight.js', 'linkcss' => '', 'copycss' => nil }
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, safe: :safe, attributes: attrs
+      assert_css 'link[rel=stylesheet] + meta[http-equiv=imagetoolbar]', output, 1
+      assert_css 'meta[http-equiv=imagetoolbar] + *', output, 0
+      assert_css 'script + a#top', output, 1
+      assert_css 'a#top + *', output, 0
+    end
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-                                        :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo' => '', 'docinfodir' => 'custom-docinfodir'}
+    test 'should include docinfo files for html backend with custom docinfodir' do
+      sample_input_path = fixture_path('basic.adoc')
+
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+                                        header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo' => '', 'docinfodir' => 'custom-docinfodir' }
       refute_empty output
       assert_css 'script[src="bootstrap.js"]', output, 1
       assert_css 'meta[name="robots"]', output, 0
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-                                        :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo1' => '', 'docinfodir' => 'custom-docinfodir'}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+                                        header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo1' => '', 'docinfodir' => 'custom-docinfodir' }
       refute_empty output
       assert_css 'script[src="bootstrap.js"]', output, 0
       assert_css 'meta[name="robots"]', output, 1
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-                                        :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo2' => '', 'docinfodir' => './custom-docinfodir'}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+                                        header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo2' => '', 'docinfodir' => './custom-docinfodir' }
       refute_empty output
       assert_css 'script[src="bootstrap.js"]', output, 1
       assert_css 'meta[name="robots"]', output, 1
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-                                        :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo2' => '', 'docinfodir' => 'custom-docinfodir/subfolder'}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+                                        header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo2' => '', 'docinfodir' => 'custom-docinfodir/subfolder' }
       refute_empty output
       assert_css 'script[src="bootstrap.js"]', output, 0
       assert_css 'meta[name="robots"]', output, 0
     end
 
     test 'should include docinfo files for docbook backend' do
-      sample_input_path = fixture_path('basic.asciidoc')
+      sample_input_path = fixture_path('basic.adoc')
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo' => '' }
       refute_empty output
       assert_css 'productname', output, 0
       assert_css 'copyright', output, 1
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo1' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo1' => '' }
       refute_empty output
       assert_css 'productname', output, 1
       assert_xpath '//xmlns:productname[text()="Asciidoctor™"]', output, 1
@@ -215,8 +222,8 @@ content
       assert_xpath '//xmlns:edition[text()="1.0"]', output, 1 # verifies substitutions are performed
       assert_css 'copyright', output, 0
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo2' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo2' => '' }
       refute_empty output
       assert_css 'productname', output, 1
       assert_xpath '//xmlns:productname[text()="Asciidoctor™"]', output, 1
@@ -226,45 +233,45 @@ content
     end
 
     test 'should include docinfo footer files for html backend' do
-      sample_input_path = fixture_path('basic.asciidoc')
+      sample_input_path = fixture_path('basic.adoc')
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo' => '' }
       refute_empty output
       assert_css 'body script', output, 1
       assert_css 'a#top', output, 0
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo1' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo1' => '' }
       refute_empty output
       assert_css 'body script', output, 0
       assert_css 'a#top', output, 1
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo2' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo2' => '' }
       refute_empty output
       assert_css 'body script', output, 1
       assert_css 'a#top', output, 1
     end
 
     test 'should include docinfo footer files for docbook backend' do
-      sample_input_path = fixture_path('basic.asciidoc')
+      sample_input_path = fixture_path('basic.adoc')
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo' => '' }
       refute_empty output
       assert_css 'article > revhistory', output, 1
       assert_xpath '/xmlns:article/xmlns:revhistory/xmlns:revision/xmlns:revnumber[text()="1.0"]', output, 1 # verifies substitutions are performed
       assert_css 'glossary#_glossary', output, 0
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo1' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo1' => '' }
       refute_empty output
       assert_css 'article > revhistory', output, 0
       assert_css 'glossary#_glossary', output, 1
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo2' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo2' => '' }
       refute_empty output
       assert_css 'article > revhistory', output, 1
       assert_xpath '/xmlns:article/xmlns:revhistory/xmlns:revision/xmlns:revnumber[text()="1.0"]', output, 1 # verifies substitutions are performed
@@ -273,62 +280,55 @@ content
 
     # WARNING this test manipulates runtime settings; should probably be run in forked process
     test 'should force encoding of docinfo files to UTF-8' do
-      sample_input_path = fixture_path('basic.asciidoc')
-
-      if RUBY_VERSION >= '1.9'
-        default_external_old = Encoding.default_external
-        force_encoding_old = Asciidoctor::FORCE_ENCODING
-        verbose_old = $VERBOSE
-      end
+      old_external = Encoding.default_external
+      old_internal = Encoding.default_internal
+      old_verbose = $VERBOSE
       begin
-        if RUBY_VERSION >= '1.9'
-          $VERBOSE = nil # disable warnings since we have to modify constants
-          Encoding.default_external = 'US-ASCII'
-          Asciidoctor::FORCE_ENCODING = true
-        end
-        output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-            :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER, :attributes => {'docinfo2' => ''}
+        $VERBOSE = nil # disable warnings since we have to modify constants
+        Encoding.default_external = Encoding.default_internal = Encoding::IBM437
+        sample_input_path = fixture_path('basic.adoc')
+        output = Asciidoctor.convert_file sample_input_path, to_file: false, header_footer: true,
+            backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docinfo' => 'private,shared' }
         refute_empty output
         assert_css 'productname', output, 1
+        assert_includes output, '<productname>Asciidoctor™</productname>'
         assert_css 'edition', output, 1
         assert_xpath '//xmlns:edition[text()="1.0"]', output, 1 # verifies substitutions are performed
         assert_css 'copyright', output, 1
       ensure
-        if RUBY_VERSION >= '1.9'
-          Encoding.default_external = default_external_old
-          Asciidoctor::FORCE_ENCODING = force_encoding_old
-          $VERBOSE = verbose_old
-        end
+        Encoding.default_external = old_external
+        Encoding.default_internal = old_internal
+        $VERBOSE = old_verbose
       end
     end
 
     test 'should not include docinfo files by default' do
-      sample_input_path = fixture_path('basic.asciidoc')
+      sample_input_path = fixture_path('basic.adoc')
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :safe => Asciidoctor::SafeMode::SERVER
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, safe: Asciidoctor::SafeMode::SERVER
       refute_empty output
       assert_css 'script[src="modernizr.js"]', output, 0
       assert_css 'meta[http-equiv="imagetoolbar"]', output, 0
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :safe => Asciidoctor::SafeMode::SERVER
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', safe: Asciidoctor::SafeMode::SERVER
       refute_empty output
       assert_css 'productname', output, 0
       assert_css 'copyright', output, 0
     end
 
     test 'should not include docinfo files if safe mode is SECURE or greater' do
-      sample_input_path = fixture_path('basic.asciidoc')
+      sample_input_path = fixture_path('basic.adoc')
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :attributes => {'docinfo2' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, attributes: { 'docinfo2' => '' }
       refute_empty output
       assert_css 'script[src="modernizr.js"]', output, 0
       assert_css 'meta[http-equiv="imagetoolbar"]', output, 0
 
-      output = Asciidoctor.convert_file sample_input_path, :to_file => false,
-          :header_footer => true, :backend => 'docbook', :attributes => {'docinfo2' => ''}
+      output = Asciidoctor.convert_file sample_input_path, to_file: false,
+          header_footer: true, backend: 'docbook', attributes: { 'docinfo2' => '' }
       refute_empty output
       assert_css 'productname', output, 0
       assert_css 'copyright', output, 0
@@ -336,27 +336,26 @@ content
 
     test 'should substitute attributes in docinfo files by default' do
       sample_input_path = fixture_path 'subs.adoc'
-      output, warnings = redirect_streams do |_, err|
+      using_memory_logger do |logger|
         output = Asciidoctor.convert_file sample_input_path,
-            :to_file => false,
-            :header_footer => true,
-            :safe => :server,
-            :attributes => { 'docinfo' => '', 'bootstrap-version' => nil, 'linkcss' => '', 'attribute-missing' => 'drop-line' }
-        [output, err.string]
+            to_file: false,
+            header_footer: true,
+            safe: :server,
+            attributes: { 'docinfo' => '', 'bootstrap-version' => nil, 'linkcss' => '', 'attribute-missing' => 'drop-line' }
+        refute_empty output
+        assert_css 'script', output, 0
+        assert_xpath %(//meta[@name="copyright"][@content="(C) OpenDevise"]), output, 1
+        assert_message logger, :WARN, 'dropping line containing reference to missing attribute: bootstrap-version'
       end
-      refute_empty output
-      assert_css 'script', output, 0
-      assert_xpath %(//meta[@name="copyright"][@content="(C) OpenDevise"]), output, 1
-      assert_includes warnings, 'dropping line containing reference to missing attribute'
     end
 
     test 'should apply explicit substitutions to docinfo files' do
       sample_input_path = fixture_path 'subs.adoc'
       output = Asciidoctor.convert_file sample_input_path,
-          :to_file => false,
-          :header_footer => true,
-          :safe => :server,
-          :attributes => { 'docinfo' => '', 'docinfosubs' => 'attributes,replacements', 'linkcss' => '' }
+          to_file: false,
+          header_footer: true,
+          safe: :server,
+          attributes: { 'docinfo' => '', 'docinfosubs' => 'attributes,replacements', 'linkcss' => '' }
       refute_empty output
       assert_css 'script[src="bootstrap.3.2.0.min.js"]', output, 1
       assert_xpath %(//meta[@name="copyright"][@content="#{decode_char 169} OpenDevise"]), output, 1
@@ -365,7 +364,7 @@ content
 
   context 'MathJax' do
     test 'should add MathJax script to HTML head if stem attribute is set' do
-      output = render_string '', :attributes => {'stem' => ''}
+      output = convert_string '', attributes: { 'stem' => '' }
       assert_match('<script type="text/x-mathjax-config">', output)
       assert_match('inlineMath: [["\\\\(", "\\\\)"]]', output)
       assert_match('displayMath: [["\\\\[", "\\\\]"]]', output)
@@ -388,7 +387,7 @@ content
     end
 
     test 'built-in DocBook45 views are registered when backend is docbook45' do
-      doc = document_from_string '', :attributes => {'backend' => 'docbook45'}
+      doc = document_from_string '', attributes: { 'backend' => 'docbook45' }
       converter = doc.converter
       assert_equal 'docbook45', doc.attributes['backend']
       assert doc.attributes.has_key? 'backend-docbook45'
@@ -402,7 +401,7 @@ content
     end
 
     test 'built-in DocBook5 views are registered when backend is docbook5' do
-      doc = document_from_string '', :attributes => {'backend' => 'docbook5'}
+      doc = document_from_string '', attributes: { 'backend' => 'docbook5' }
       converter = doc.converter
       assert_equal 'docbook5', doc.attributes['backend']
       assert doc.attributes.has_key? 'backend-docbook5'
@@ -419,12 +418,12 @@ content
       {
         '' => %w(favicon.ico image/x-icon),
         '/favicon.ico' => %w(/favicon.ico image/x-icon),
-        '/img/favicon.png' => %w(/img/favicon.png image/png)
+        '/img/favicon.png' => %w(/img/favicon.png image/png),
       }.each {|val, (href, type)|
-        result = render_string %(= Untitled), :attributes => { 'favicon' => val }
-        assert_css 'link[rel="shortcut icon"]', result, 1
-        assert_css %(link[rel="shortcut icon"][href="#{href}"]), result, 1
-        assert_css %(link[rel="shortcut icon"][type="#{type}"]), result, 1
+        result = convert_string '= Untitled', attributes: { 'favicon' => val }
+        assert_css 'link[rel="icon"]', result, 1
+        assert_css %(link[rel="icon"][href="#{href}"]), result, 1
+        assert_css %(link[rel="icon"][type="#{type}"]), result, 1
       }
     end
   end
@@ -475,7 +474,7 @@ Document Title
 +content+
       EOS
 
-      doc = document_from_string input, :attributes => { 'compat-mode' => nil }
+      doc = document_from_string input, attributes: { 'compat-mode' => nil }
       assert(doc.attribute_locked? 'compat-mode')
       assert_nil(doc.attr 'compat-mode')
       result = doc.convert
@@ -489,7 +488,7 @@ Document Title
     end
 
     test 'title partition API with custom separator' do
-      title = Asciidoctor::Document::Title.new 'Main Title:: And More:: Subtitle', :separator => '::'
+      title = Asciidoctor::Document::Title.new 'Main Title:: And More:: Subtitle', separator: '::'
       assert_equal 'Main Title:: And More', title.main
       assert_equal 'Subtitle', title.subtitle
     end
@@ -503,7 +502,7 @@ content
       EOS
 
       doc = document_from_string input
-      title = doc.doctitle :partition => true, :sanitize => true
+      title = doc.doctitle partition: true, sanitize: true
       assert title.subtitle?
       assert title.sanitized?
       assert_equal 'Main Title', title.main
@@ -520,7 +519,7 @@ content
       EOS
 
       doc = document_from_string input
-      title = doc.doctitle :partition => true, :sanitize => true
+      title = doc.doctitle partition: true, sanitize: true
       assert title.subtitle?
       assert title.sanitized?
       assert_equal 'Main Title', title.main
@@ -536,8 +535,8 @@ Author Name
 content
       EOS
 
-      doc = document_from_string input, :attributes => { 'title-separator' => ' -' }
-      title = doc.doctitle :partition => true, :sanitize => true
+      doc = document_from_string input, attributes: { 'title-separator' => ' -' }
+      title = doc.doctitle partition: true, sanitize: true
       assert title.subtitle?
       assert title.sanitized?
       assert_equal 'Main Title', title.main
@@ -590,7 +589,7 @@ Block content
      assert doc.has_header?
      assert_equal 'Document Title', doc.header.title
      assert_equal 'Document Title', doc.first_section.title
-     assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.render, 1
+     assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
     end
 
     test 'document with blank title attribute entry overrides doctitle' do
@@ -608,7 +607,7 @@ Block content
      assert doc.has_header?
      assert_equal 'Document Title', doc.header.title
      assert_equal 'Document Title', doc.first_section.title
-     assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.render, 1
+     assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
     end
 
     test 'document with title attribute entry overrides doctitle attribute entry' do
@@ -628,7 +627,7 @@ Block content
      assert doc.has_header?
      assert_equal 'doctitle', doc.header.title
      assert_equal 'doctitle', doc.first_section.title
-     assert_xpath '//*[@id="preamble"]//p[text()="Document Title, doctitle"]', doc.render, 1
+     assert_xpath '//*[@id="preamble"]//p[text()="Document Title, doctitle"]', doc.convert, 1
     end
 
     test 'document with doctitle attribute entry overrides header title and doctitle' do
@@ -647,7 +646,7 @@ Block content
      assert doc.has_header?
      assert_equal 'Override', doc.header.title
      assert_equal 'Override', doc.first_section.title
-     assert_xpath '//*[@id="preamble"]//p[text()="Document Title, Override"]', doc.render, 1
+     assert_xpath '//*[@id="preamble"]//p[text()="Document Title, Override"]', doc.convert, 1
     end
 
     test 'doctitle attribute entry above header overrides header title and doctitle' do
@@ -665,7 +664,7 @@ Block content
      assert doc.has_header?
      assert_equal 'Override', doc.header.title
      assert_equal 'Override', doc.first_section.title
-     assert_xpath '//*[@id="preamble"]//p[text()="Override"]', doc.render, 1
+     assert_xpath '//*[@id="preamble"]//p[text()="Override"]', doc.convert, 1
     end
 
     test 'should recognize document title when preceded by blank lines' do
@@ -680,9 +679,15 @@ preamble
 
 text
       EOS
-      output = render_string input, :safe => Asciidoctor::SafeMode::SAFE
+      output = convert_string input, safe: Asciidoctor::SafeMode::SAFE
       assert_css '#header h1', output, 1
       assert_css '#content h1', output, 0
+    end
+
+    test 'document with multiline attribute entry but only one line should not crash' do
+      input = ':foo: bar' + Asciidoctor::LINE_CONTINUATION
+      doc = document_from_string input
+      assert_equal 'bar', doc.attributes['foo']
     end
 
     test 'should sanitize contents of HTML title element' do
@@ -692,7 +697,7 @@ text
 content
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_xpath '/html/head/title[text()="Document Title"]', output, 1
       nodes = xmlnodes_at_xpath('//*[@id="header"]/h1', output)
       assert_equal 1, nodes.size
@@ -728,7 +733,7 @@ v8.6.8, 2012-07-12: See changelog.
 
 more info...
       EOS
-      output = render_string input
+      output = convert_string input
       assert_xpath '//meta[@name="author"][@content="Stuart Rackham"]', output, 1
       assert_xpath '//meta[@name="description"][@content="AsciiDoc user guide"]', output, 1
       assert_xpath '//meta[@name="keywords"][@content="asciidoc,documentation"]', output, 1
@@ -765,7 +770,7 @@ Author Name
 content
       EOS
 
-      output = render_string input, :backend => 'docbook'
+      output = convert_string input, backend: 'docbook'
       assert_css 'revhistory', output, 1
       assert_css 'revhistory > revision', output, 1
       assert_css 'revhistory > revision > date', output, 1
@@ -782,7 +787,7 @@ Author Name
 content
       EOS
 
-      output = render_string input, :backend => 'docbook'
+      output = convert_string input, backend: 'docbook'
       assert_css 'revhistory', output, 1
       assert_css 'revhistory > revision', output, 1
       assert_css 'revhistory > revision > date', output, 1
@@ -798,7 +803,7 @@ Author Name
 content
       EOS
 
-      output = render_string input, :backend => 'docbook'
+      output = convert_string input, backend: 'docbook'
       assert_css 'revhistory', output, 0
     end
 
@@ -812,7 +817,7 @@ v8.6.8, 2012-07-12: See changelog.
 
 more info...
       EOS
-      output = render_string input, :backend => 'docbook45'
+      output = convert_string input, backend: 'docbook45'
       assert_xpath '/article/articleinfo', output, 1
       assert_xpath '/article/articleinfo/title[text() = "AsciiDoc"]', output, 1
       assert_xpath '/article/articleinfo/date[text() = "2012-07-12"]', output, 1
@@ -825,6 +830,10 @@ more info...
       assert_xpath '/article/articleinfo/revhistory/revision/date[text() = "2012-07-12"]', output, 1
       assert_xpath '/article/articleinfo/revhistory/revision/authorinitials[text() = "SR"]', output, 1
       assert_xpath '/article/articleinfo/revhistory/revision/revremark[text() = "See changelog."]', output, 1
+      article = xmlnodes_at_xpath '/article', output, 1
+      # nokogiri can't make up its mind
+      id_attr = article.attribute('id') || article.attribute('xml:id')
+      assert_nil id_attr
     end
 
     test 'with metadata to DocBook5' do
@@ -836,13 +845,47 @@ Stuart Rackham <founder@asciidoc.org>
 
 more info...
       EOS
-      output = render_string input, :backend => 'docbook5'
+      output = convert_string input, backend: 'docbook5'
       assert_xpath '/article/info', output, 1
       assert_xpath '/article/info/title[text() = "AsciiDoc"]', output, 1
       assert_xpath '/article/info/author/personname', output, 1
       assert_xpath '/article/info/author/personname/firstname[text() = "Stuart"]', output, 1
       assert_xpath '/article/info/author/personname/surname[text() = "Rackham"]', output, 1
       assert_xpath '/article/info/author/email[text() = "founder@asciidoc.org"]', output, 1
+      article = xmlnodes_at_xpath '/article', output, 1
+      # nokogiri can't make up its mind
+      id_attr = article.attribute('id') || article.attribute('xml:id')
+      assert_nil id_attr
+    end
+
+    test 'with document ID to Docbook 4.5' do
+      input = <<-EOS
+[[document-id]]
+= Document Title
+
+more info...
+      EOS
+      output = convert_string input, backend: 'docbook45'
+      article = xmlnodes_at_xpath '/article', output, 1
+      # nokogiri can't make up its mind
+      id_attr = article.attribute('id') || article.attribute('xml:id')
+      refute_nil id_attr
+      assert_equal 'document-id', id_attr.value
+    end
+
+    test 'with document ID to Docbook 5' do
+      input = <<-EOS
+[[document-id]]
+= Document Title
+
+more info...
+      EOS
+      output = convert_string input, backend: 'docbook', keep_namespaces: true
+      article = xmlnodes_at_xpath '/xmlns:article', output, 1
+      # nokogiri can't make up its mind
+      id_attr = article.attribute('id') || article.attribute('xml:id')
+      refute_nil id_attr
+      assert_equal 'document-id', id_attr.value
     end
 
     test 'with author defined using attribute entry to DocBook 4.5' do
@@ -854,7 +897,7 @@ more info...
 content
       EOS
 
-      output = render_string input, :backend => 'docbook45'
+      output = convert_string input, backend: 'docbook45'
       assert_xpath '//articleinfo/author', output, 1
       assert_xpath '//articleinfo/author/firstname[text() = "Doc"]', output, 1
       assert_xpath '//articleinfo/author/surname[text() = "Writer"]', output, 1
@@ -870,7 +913,7 @@ content
 content
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_xpath '//meta[@name="author"][@content="Ze Product team"]', output, 1
     end
 
@@ -882,7 +925,7 @@ R&D Lab
 {author}
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_includes output, 'R&amp;D Lab', 2
     end
 
@@ -894,7 +937,7 @@ Doc Writer <thedoctor@asciidoc.org>; Junior Writer <junior@asciidoctor.org>
 content
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_xpath '//span[@id="author"]', output, 1
       assert_xpath '//span[@id="author"][text()="Doc Writer"]', output, 1
       assert_xpath '//span[@id="email"]', output, 1
@@ -915,12 +958,25 @@ Doc Writer <thedoctor@asciidoc.org>; Junior Writer <junior@asciidoctor.org>
 content
       EOS
 
-      output = render_string input, :backend => 'docbook45'
+      output = convert_string input, backend: 'docbook45'
       assert_xpath '//articleinfo/author', output, 0
       assert_xpath '//articleinfo/authorgroup', output, 1
       assert_xpath '//articleinfo/authorgroup/author', output, 2
       assert_xpath '//articleinfo/authorgroup/author[1]/firstname[text() = "Doc"]', output, 1
       assert_xpath '//articleinfo/authorgroup/author[2]/firstname[text() = "Junior"]', output, 1
+    end
+
+    test 'with author defined by indexed attribute name' do
+      input = <<-EOS
+= Document Title
+:author_1: Doc Writer
+
+{author}
+      EOS
+
+      doc = document_from_string input
+      assert_equal 'Doc Writer', (doc.attr 'author')
+      assert_equal 'Doc Writer', (doc.attr 'author_1')
     end
 
     test 'with authors defined using attribute entry to DocBook' do
@@ -933,7 +989,7 @@ content
 content
       EOS
 
-      output = render_string input, :backend => 'docbook45'
+      output = convert_string input, backend: 'docbook45'
       assert_xpath '//articleinfo/author', output, 0
       assert_xpath '//articleinfo/authorgroup', output, 1
       assert_xpath '//articleinfo/authorgroup/author', output, 2
@@ -943,10 +999,50 @@ content
       assert_xpath '(//articleinfo/authorgroup/author)[2]/email[text() = "junior@asciidoc.org"]', output, 1
     end
 
+    test 'should populate copyright element in DocBook output if copyright attribute is defined' do
+      input = <<-EOS
+= Jet Bike
+:copyright: ACME, Inc.
+
+Essential for catching road runners.
+      EOS
+      output = convert_string input, backend: 'docbook5'
+      assert_xpath '/article/info/copyright', output, 1
+      assert_xpath '/article/info/copyright/holder[text()="ACME, Inc."]', output, 1
+    end
+
+    test 'should populate copyright element in DocBook output if copyright attribute is defined with year' do
+      input = <<-EOS
+= Jet Bike
+:copyright: ACME, Inc. 1956
+
+Essential for catching road runners.
+      EOS
+      output = convert_string input, backend: 'docbook5'
+      assert_xpath '/article/info/copyright', output, 1
+      assert_xpath '/article/info/copyright/holder[text()="ACME, Inc."]', output, 1
+      assert_xpath '/article/info/copyright/year', output, 1
+      assert_xpath '/article/info/copyright/year[text()="1956"]', output, 1
+    end
+
+    test 'should populate copyright element in DocBook output if copyright attribute is defined with year range' do
+      input = <<-EOS
+= Jet Bike
+:copyright: ACME, Inc. 1956-2018
+
+Essential for catching road runners.
+      EOS
+      output = convert_string input, backend: 'docbook5'
+      assert_xpath '/article/info/copyright', output, 1
+      assert_xpath '/article/info/copyright/holder[text()="ACME, Inc."]', output, 1
+      assert_xpath '/article/info/copyright/year', output, 1
+      assert_xpath '/article/info/copyright/year[text()="1956-2018"]', output, 1
+    end
+
     test 'with header footer' do
       doc = document_from_string "= Title\n\nparagraph"
       refute doc.attr?('embedded')
-      result = doc.render
+      result = doc.convert
       assert_xpath '/html', result, 1
       assert_xpath '//*[@id="header"]', result, 1
       assert_xpath '//*[@id="header"]/h1', result, 1
@@ -954,28 +1050,28 @@ content
       assert_xpath '//*[@id="content"]', result, 1
     end
 
-    test 'does not render footer if nofooter is set' do
+    test 'does not output footer if nofooter is set' do
       input = <<-EOS
 :nofooter:
 
 content
       EOS
 
-      result = render_string input
+      result = convert_string input
       assert_xpath '//*[@id="footer"]', result, 0
     end
 
     test 'can disable last updated in footer' do
-      doc = document_from_string "= Document Title\n\npreamble", :attributes => {'last-update-label!' => ''}
-      result = doc.render
+      doc = document_from_string "= Document Title\n\npreamble", attributes: { 'last-update-label!' => '' }
+      result = doc.convert
       assert_xpath '//*[@id="footer-text"]', result, 1
       assert_xpath '//*[@id="footer-text"][normalize-space(text())=""]', result, 1
     end
 
     test 'no header footer' do
-      doc = document_from_string "= Document Title\n\ncontent", :header_footer => false
+      doc = document_from_string "= Document Title\n\ncontent", header_footer: false
       assert doc.attr?('embedded')
-      result = doc.render
+      result = doc.convert
       assert_xpath '/html', result, 0
       assert_xpath '/h1', result, 0
       assert_xpath '/*[@id="header"]', result, 0
@@ -990,7 +1086,7 @@ content
 content
       EOS
 
-      result = render_embedded_string input, :attributes => {'notitle!' => ''}
+      result = convert_string_to_embedded input, attributes: { 'notitle!' => '' }
       assert_xpath '/html', result, 0
       assert_xpath '/h1', result, 1
       assert_xpath '/*[@id="header"]', result, 0
@@ -1007,7 +1103,7 @@ content
 content
       EOS
 
-      result = render_embedded_string input, :attributes => {'showtitle' => ''}
+      result = convert_string_to_embedded input, attributes: { 'showtitle' => '' }
       assert_xpath '/html', result, 0
       assert_xpath '/h1', result, 1
       assert_xpath '/*[@id="header"]', result, 0
@@ -1026,7 +1122,7 @@ Author Name
 preamble
       EOS
 
-      doc = document_from_string input, :parse_header_only => true
+      doc = document_from_string input, parse_header_only: true
       assert_equal 'Document Title', doc.doctitle
       assert_equal 'Author Name', doc.author
       assert_equal 'bar', doc.attributes['foo']
@@ -1034,46 +1130,46 @@ preamble
       assert_equal 0, doc.blocks.size
     end
 
-    test 'renders footnotes in footer' do
+    test 'outputs footnotes in footer' do
       input = <<-EOS
 A footnote footnote:[An example footnote.];
 a second footnote with a reference ID footnoteref:[note2,Second footnote.];
 finally a reference to the second footnote footnoteref:[note2].
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_css '#footnotes', output, 1
       assert_css '#footnotes .footnote', output, 2
-      assert_css '#footnotes .footnote#_footnote_1', output, 1
-      assert_xpath '//div[@id="footnotes"]/div[@id="_footnote_1"]/a[@href="#_footnoteref_1"][text()="1"]', output, 1
-      text = xmlnodes_at_xpath '//div[@id="footnotes"]/div[@id="_footnote_1"]/text()', output
+      assert_css '#footnotes .footnote#_footnotedef_1', output, 1
+      assert_xpath '//div[@id="footnotes"]/div[@id="_footnotedef_1"]/a[@href="#_footnoteref_1"][text()="1"]', output, 1
+      text = xmlnodes_at_xpath '//div[@id="footnotes"]/div[@id="_footnotedef_1"]/text()', output
       assert_equal '. An example footnote.', text.text.strip
-      assert_css '#footnotes .footnote#_footnote_2', output, 1
-      assert_xpath '//div[@id="footnotes"]/div[@id="_footnote_2"]/a[@href="#_footnoteref_2"][text()="2"]', output, 1
-      text = xmlnodes_at_xpath '//div[@id="footnotes"]/div[@id="_footnote_2"]/text()', output
+      assert_css '#footnotes .footnote#_footnotedef_2', output, 1
+      assert_xpath '//div[@id="footnotes"]/div[@id="_footnotedef_2"]/a[@href="#_footnoteref_2"][text()="2"]', output, 1
+      text = xmlnodes_at_xpath '//div[@id="footnotes"]/div[@id="_footnotedef_2"]/text()', output
       assert_equal '. Second footnote.', text.text.strip
     end
 
-    test 'renders footnotes block in embedded document by default' do
+    test 'outputs footnotes block in embedded document by default' do
       input = <<-EOS
 Text that has supporting information{empty}footnote:[An example footnote.].
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css '#footnotes', output, 1
       assert_css '#footnotes .footnote', output, 1
-      assert_css '#footnotes .footnote#_footnote_1', output, 1
-      assert_xpath '/div[@id="footnotes"]/div[@id="_footnote_1"]/a[@href="#_footnoteref_1"][text()="1"]', output, 1
-      text = xmlnodes_at_xpath '/div[@id="footnotes"]/div[@id="_footnote_1"]/text()', output
+      assert_css '#footnotes .footnote#_footnotedef_1', output, 1
+      assert_xpath '/div[@id="footnotes"]/div[@id="_footnotedef_1"]/a[@href="#_footnoteref_1"][text()="1"]', output, 1
+      text = xmlnodes_at_xpath '/div[@id="footnotes"]/div[@id="_footnotedef_1"]/text()', output
       assert_equal '. An example footnote.', text.text.strip
     end
 
-    test 'does not render footnotes block in embedded document if nofootnotes attribute is set' do
+    test 'does not output footnotes block in embedded document if nofootnotes attribute is set' do
       input = <<-EOS
 Text that has supporting information{empty}footnote:[An example footnote.].
       EOS
 
-      output = render_embedded_string input, :attributes => {'nofootnotes' => ''}
+      output = convert_string_to_embedded input, attributes: { 'nofootnotes' => '' }
       assert_css '#footnotes', output, 0
     end
   end
@@ -1100,11 +1196,28 @@ content{blank}footnote:[commentary]
       assert_same doc.catalog[:ids], doc.references[:ids]
       assert_equal 'Section A', doc.references[:ids]['_section_a']
     end
+
+    test 'should catalog assets inside nested document' do
+      input = <<-EOS
+image::outer.png[]
+
+|===
+a|
+image::inner.png[]
+|===
+      EOS
+
+      doc = document_from_string input, catalog_assets: true
+      images = doc.catalog[:images]
+      refute_empty images
+      assert_equal 2, images.size
+      assert_equal images.map {|it| it.target }, ['outer.png', 'inner.png']
+    end
   end
 
   context 'Backends and Doctypes' do
     test 'html5 backend doctype article' do
-      result = render_string("= Title\n\nparagraph", :attributes => {'backend' => 'html5'})
+      result = convert_string("= Title\n\nparagraph", attributes: { 'backend' => 'html5' })
       assert_xpath '/html', result, 1
       assert_xpath '/html/body[@class="article"]', result, 1
       assert_xpath '/html//*[@id="header"]/h1[text() = "Title"]', result, 1
@@ -1112,7 +1225,7 @@ content{blank}footnote:[commentary]
     end
 
     test 'html5 backend doctype book' do
-      result = render_string("= Title\n\nparagraph", :attributes => {'backend' => 'html5', 'doctype' => 'book'})
+      result = convert_string("= Title\n\nparagraph", attributes: { 'backend' => 'html5', 'doctype' => 'book' })
       assert_xpath '/html', result, 1
       assert_xpath '/html/body[@class="book"]', result, 1
       assert_xpath '/html//*[@id="header"]/h1[text() = "Title"]', result, 1
@@ -1123,7 +1236,7 @@ content{blank}footnote:[commentary]
       input = <<-EOS
 content
       EOS
-      doc = document_from_string input, :backend => :xhtml5
+      doc = document_from_string input, backend: :xhtml5
       assert_equal 'html5', doc.backend
       assert_equal 'xml', (doc.attr 'htmlsyntax')
     end
@@ -1132,7 +1245,7 @@ content
       input = <<-EOS
 content
       EOS
-      doc = document_from_string input, :backend => :xhtml
+      doc = document_from_string input, backend: :xhtml
       assert_equal 'html5', doc.backend
       assert_equal 'xml', (doc.attr 'htmlsyntax')
     end
@@ -1141,10 +1254,10 @@ content
       input = <<-EOS
 ---
       EOS
-      doc = document_from_string input, :safe => :safe, :attributes => { 'htmlsyntax' => 'xml' }
+      doc = document_from_string input, safe: :safe, attributes: { 'htmlsyntax' => 'xml' }
       assert_equal 'html5', doc.backend
       assert_equal 'xml', (doc.attr 'htmlsyntax')
-      result = doc.convert :header_footer => false
+      result = doc.convert header_footer: false
       assert_equal '<hr/>', result
     end
 
@@ -1155,10 +1268,10 @@ content
 
 ---
       EOS
-      doc = document_from_string input, :safe => :safe
+      doc = document_from_string input, safe: :safe
       assert_equal 'html5', doc.backend
       assert_equal 'xml', (doc.attr 'htmlsyntax')
-      result = doc.convert :header_footer => false
+      result = doc.convert header_footer: false
       assert_equal '<hr/>', result
     end
 
@@ -1169,7 +1282,7 @@ content
 
 ---
       EOS
-      result = render_embedded_string input, :safe => :safe
+      result = convert_string_to_embedded input, safe: :safe
       assert_equal '<hr>', result
     end
 
@@ -1179,6 +1292,7 @@ content
 Author Name
 v1.0, 2001-01-01
 :icons:
+:favicon:
 
 image:tiger.png[]
 
@@ -1219,7 +1333,7 @@ two
 
 '''
       EOS
-      result = render_string input, :safe => :safe, :backend => :xhtml
+      result = convert_string input, safe: :safe, backend: :xhtml
       begin
         Nokogiri::XML::Document.parse(result) {|config|
           config.options = Nokogiri::XML::ParseOptions::STRICT | Nokogiri::XML::ParseOptions::NONET
@@ -1233,7 +1347,7 @@ two
       input = <<-EOS
 content
       EOS
-      result = render_string input, :safe => :safe, :backend => :xhtml, :keep_namespaces => true
+      result = convert_string input, safe: :safe, backend: :xhtml, keep_namespaces: true
       assert_xpath '//*[not(namespace-uri() = "http://www.w3.org/1999/xhtml")]', result, 0
     end
 
@@ -1247,7 +1361,7 @@ preamble
 
 section body
       EOS
-      result = render_string(input, :attributes => {'backend' => 'docbook45'})
+      result = convert_string(input, attributes: { 'backend' => 'docbook45' })
       assert_xpath '/article', result, 1
       assert_xpath '/article/articleinfo/title[text() = "Title"]', result, 1
       assert_xpath '/article/simpara[text() = "preamble"]', result, 1
@@ -1257,14 +1371,14 @@ section body
     end
 
     test 'docbook45 backend doctype article no title' do
-      result = render_string('text', :attributes => {'backend' => 'docbook45'})
+      result = convert_string('text', attributes: { 'backend' => 'docbook45' })
       assert_xpath '/article', result, 1
       assert_xpath '/article/articleinfo/date', result, 1
       assert_xpath '/article/simpara[text() = "text"]', result, 1
     end
 
     test 'docbook45 backend doctype article no xmlns' do
-      result = render_string('text', :keep_namespaces => true, :attributes => {'backend' => 'docbook45', 'doctype' => 'article'})
+      result = convert_string('text', keep_namespaces: true, attributes: { 'backend' => 'docbook45', 'doctype' => 'article' })
       refute_match(RE_XMLNS_ATTRIBUTE, result)
     end
 
@@ -1284,7 +1398,7 @@ some text
 
 section body
       EOS
-      result = render_string(input, :attributes => {'backend' => 'docbook45', 'doctype' => 'manpage'})
+      result = convert_string(input, attributes: { 'backend' => 'docbook45', 'doctype' => 'manpage' })
       assert_xpath '/refentry', result, 1
       assert_xpath '/refentry/refentryinfo/title[text() = "asciidoctor(1)"]', result, 1
       assert_xpath '/refentry/refmeta/refentrytitle[text() = "asciidoctor"]', result, 1
@@ -1308,7 +1422,7 @@ preamble
 
 chapter body
       EOS
-      result = render_string(input, :attributes => {'backend' => 'docbook45', 'doctype' => 'book'})
+      result = convert_string(input, attributes: { 'backend' => 'docbook45', 'doctype' => 'book' })
       assert_xpath '/book', result, 1
       assert_xpath '/book/bookinfo/title[text() = "Title"]', result, 1
       assert_xpath '/book/preface/simpara[text() = "preamble"]', result, 1
@@ -1318,7 +1432,7 @@ chapter body
     end
 
     test 'docbook45 backend doctype book no title' do
-      result = render_string('text', :attributes => {'backend' => 'docbook45', 'doctype' => 'book'})
+      result = convert_string('text', attributes: { 'backend' => 'docbook45', 'doctype' => 'book' })
       assert_xpath '/book', result, 1
       assert_xpath '/book/bookinfo/date', result, 1
       # NOTE simpara cannot be a direct child of book, so content must be treated as a preface
@@ -1326,7 +1440,7 @@ chapter body
     end
 
     test 'docbook45 backend doctype book no xmlns' do
-      result = render_string('text', :keep_namespaces => true, :attributes => {'backend' => 'docbook45', 'doctype' => 'book'})
+      result = convert_string('text', keep_namespaces: true, attributes: { 'backend' => 'docbook45', 'doctype' => 'book' })
       refute_match(RE_XMLNS_ATTRIBUTE, result)
     end
 
@@ -1337,7 +1451,7 @@ chapter body
 
 text
       EOS
-      result = render_string input, :backend => 'docbook45'
+      result = convert_string input, backend: 'docbook45'
       assert_xpath '/book', result, 1
       assert_xpath '/book/bookinfo/title[text() = "Document Title"]', result, 1
       assert_xpath '/book/bookinfo/subtitle[text() = "Subtitle"]', result, 1
@@ -1354,7 +1468,7 @@ preamble
 
 section body
       EOS
-      result = render_string(input, :keep_namespaces => true, :attributes => {'backend' => 'docbook5'})
+      result = convert_string(input, keep_namespaces: true, attributes: { 'backend' => 'docbook5' })
       assert_xpath '/xmlns:article', result, 1
       doc = xmlnodes_at_xpath('/xmlns:article', result, 1)
       assert_equal 'http://docbook.org/ns/docbook', doc.namespaces['xmlns']
@@ -1375,6 +1489,8 @@ section body
     test 'docbook5 backend doctype manpage' do
       input = <<-EOS
 = asciidoctor(1)
+:mansource: Asciidoctor
+:manmanual: Asciidoctor Manual
 
 == NAME
 
@@ -1388,7 +1504,7 @@ some text
 
 section body
       EOS
-      result = render_string(input, :keep_namespaces => true, :attributes => {'backend' => 'docbook5', 'doctype' => 'manpage'})
+      result = convert_string(input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'manpage' })
       assert_xpath '/xmlns:refentry', result, 1
       doc = xmlnodes_at_xpath('/xmlns:refentry', result, 1)
       assert_equal 'http://docbook.org/ns/docbook', doc.namespaces['xmlns']
@@ -1397,6 +1513,8 @@ section body
       assert_xpath '/xmlns:refentry/xmlns:info/xmlns:title[text() = "asciidoctor(1)"]', result, 1
       assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:refentrytitle[text() = "asciidoctor"]', result, 1
       assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:manvolnum[text() = "1"]', result, 1
+      assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="source"][text() = "Asciidoctor"]', result, 1
+      assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="manual"][text() = "Asciidoctor Manual"]', result, 1
       assert_xpath '/xmlns:refentry/xmlns:refnamediv/xmlns:refname[text() = "asciidoctor"]', result, 1
       assert_xpath '/xmlns:refentry/xmlns:refnamediv/xmlns:refpurpose[text() = "Process text"]', result, 1
       assert_xpath '/xmlns:refentry/xmlns:refsynopsisdiv', result, 1
@@ -1411,6 +1529,23 @@ section body
       assert_equal '_first_section', id_attr.value
     end
 
+    test 'should output non-breaking space for source and manual in docbook5 manpage output if absent from source' do
+      input = <<-EOS
+= asciidoctor(1)
+
+== NAME
+
+asciidoctor - Process text
+
+== SYNOPSIS
+
+some text
+      EOS
+      result = convert_string(input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'manpage' })
+      assert_xpath %(/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="source"][text() = "#{decode_char 160}"]), result, 1
+      assert_xpath %(/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="manual"][text() = "#{decode_char 160}"]), result, 1
+    end
+
     test 'docbook5 backend doctype book' do
       input = <<-EOS
 = Title
@@ -1422,7 +1557,7 @@ preamble
 
 chapter body
       EOS
-      result = render_string(input, :keep_namespaces => true, :attributes => {'backend' => 'docbook5', 'doctype' => 'book'})
+      result = convert_string(input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'book' })
       assert_xpath '/xmlns:book', result, 1
       doc = xmlnodes_at_xpath('/xmlns:book', result, 1)
       assert_equal 'http://docbook.org/ns/docbook', doc.namespaces['xmlns']
@@ -1458,7 +1593,7 @@ eve, islifeform - analyzes an image to determine if it's a picture of a life for
 *eve* ['OPTION']... 'FILE'...
       EOS
 
-      result = render_string input, :backend => 'docbook5'
+      result = convert_string input, backend: 'docbook5'
       assert_xpath '/refentry/refnamediv/refname', result, 2
       assert_xpath '(/refentry/refnamediv/refname)[1][text()="eve"]', result, 1
       assert_xpath '(/refentry/refnamediv/refname)[2][text()="islifeform"]', result, 1
@@ -1479,7 +1614,7 @@ preamble
 chapter body
       EOS
 
-      result = render_string input, :attributes => {'backend' => 'docbook5'}
+      result = convert_string input, attributes: { 'backend' => 'docbook5' }
       assert_xpath '//info/cover[@role="front"]', result, 1
       assert_xpath '//info/cover[@role="front"]//imagedata[@fileref="images/front-cover.jpg"]', result, 1
       assert_xpath '//info/cover[@role="back"]', result, 1
@@ -1487,22 +1622,22 @@ chapter body
     end
 
     test 'should be able to set backend using :backend option key' do
-      doc = empty_document :backend => 'html5'
+      doc = empty_document backend: 'html5'
       assert_equal 'html5', doc.attributes['backend']
     end
 
     test ':backend option should override backend attribute' do
-      doc = empty_document :backend => 'html5', :attributes => {'backend' => 'docbook45'}
+      doc = empty_document backend: 'html5', attributes: { 'backend' => 'docbook45' }
       assert_equal 'html5', doc.attributes['backend']
     end
 
     test 'should be able to set doctype using :doctype option key' do
-      doc = empty_document :doctype => 'book'
+      doc = empty_document doctype: 'book'
       assert_equal 'book', doc.attributes['doctype']
     end
 
     test ':doctype option should override doctype attribute' do
-      doc = empty_document :doctype => 'book', :attributes => {'doctype' => 'article'}
+      doc = empty_document doctype: 'book', attributes: { 'doctype' => 'article' }
       assert_equal 'book', doc.attributes['doctype']
     end
 
@@ -1514,7 +1649,7 @@ Stuart Rackham <founder@asciidoc.org>
 
 more info...
       EOS
-      output = render_string input, :attributes => {'backend' => 'docbook45'}
+      output = convert_string input, attributes: { 'backend' => 'docbook45' }
       assert_xpath '/article/articleinfo/authorinitials[text()="SJR"]', output, 1
     end
 
@@ -1565,7 +1700,7 @@ asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
       input = <<-EOS
 = {app}(1)
 :doctype: manpage
-:app: asciidoctor
+:app: Asciidoctor
 
 == NAME
 
@@ -1603,7 +1738,7 @@ asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
 asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
       EOS
 
-      doc = document_from_string input, :backend => 'manpage'
+      doc = document_from_string input, backend: 'manpage'
       assert_equal 'asciidoctor', doc.attributes['docname']
       assert_equal '.1', doc.attributes['outfilesuffix']
     end
@@ -1644,7 +1779,7 @@ asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
 *asciidoctor* ['OPTION']... 'FILE'..
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_css 'body.manpage', output, 1
       assert_xpath '//body/*[@id="header"]/h1[text()="asciidoctor(1) Manual Page"]', output, 1
       assert_xpath '//body/*[@id="header"]/h1/following-sibling::h2[text()="NAME"]', output, 1
@@ -1669,7 +1804,7 @@ asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
 *asciidoctor* ['OPTION']... 'FILE'..
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath '/h1[text()="asciidoctor(1) Manual Page"]', output, 1
       assert_xpath '/h1/following-sibling::h2[text()="NAME"]', output, 1
       assert_xpath '/h2[@id="_name"][text()="NAME"]', output, 1
@@ -1687,18 +1822,23 @@ asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
 
     test 'keeps naughty absolute paths from getting outside' do
       naughty_path = "#{disk_root}etc/passwd"
-      doc = empty_document
-      secure_path = doc.normalize_asset_path(naughty_path)
-      refute_equal naughty_path, secure_path
-      assert_match(/^#{doc.base_dir}/, secure_path)
+      using_memory_logger do |logger|
+        doc = empty_document
+        secure_path = doc.normalize_asset_path naughty_path
+        refute_equal naughty_path, secure_path
+        assert_equal ::File.join(doc.base_dir, 'etc/passwd'), secure_path
+        assert_message logger, :WARN, 'path is outside of jail; recovering automatically'
+      end
     end
 
     test 'keeps naughty relative paths from getting outside' do
       naughty_path = 'safe/ok/../../../../../etc/passwd'
-      doc = empty_document
-      secure_path = redirect_streams { doc.normalize_asset_path(naughty_path) }
-      refute_equal naughty_path, secure_path
-      assert_match(/^#{doc.base_dir}/, secure_path)
+      using_memory_logger do
+        doc = empty_document
+        secure_path = doc.normalize_asset_path naughty_path
+        refute_equal naughty_path, secure_path
+        assert_match(/^#{doc.base_dir}/, secure_path)
+      end
     end
 
     test 'should raise an exception when a converter cannot be resolved before conversion' do
@@ -1708,7 +1848,7 @@ asciidoctor - converts AsciiDoc source files to HTML, DocBook and other formats
 text
       EOS
       exception = assert_raises NotImplementedError do
-        Asciidoctor.convert input, :backend => 'unknownBackend'
+        Asciidoctor.convert input, backend: 'unknownBackend'
       end
       assert_includes exception.message, 'missing converter for backend \'unknownBackend\''
     end
@@ -1722,7 +1862,7 @@ text
 text
       EOS
       exception = assert_raises NotImplementedError do
-        Asciidoctor.convert input, :backend => 'unknownBackend'
+        Asciidoctor.convert input, backend: 'unknownBackend'
       end
       assert_includes exception.message, 'missing converter for backend \'unknownBackend\''
     end

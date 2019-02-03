@@ -1,4 +1,3 @@
-# encoding: UTF-8
 module Asciidoctor
 # Public: Handles parsing AsciiDoc attribute lists into a Hash of key/value
 # pairs. By default, attributes must each be separated by a comma and quotes
@@ -11,30 +10,31 @@ module Asciidoctor
 #    attrlist = Asciidoctor::AttributeList.new('astyle')
 #
 #    attrlist.parse
-#    => {0 => 'astyle'}
+#    => { 0 => 'astyle' }
 #
 #    attrlist.rekey(['style'])
-#    => {'style' => 'astyle'}
+#    => { 'style' => 'astyle' }
 #
 #    attrlist = Asciidoctor::AttributeList.new('quote, Famous Person, Famous Book (2001)')
 #
 #    attrlist.parse(['style', 'attribution', 'citetitle'])
-#    => {'style' => 'quote', 'attribution' => 'Famous Person', 'citetitle' => 'Famous Book (2001)'}
+#    => { 'style' => 'quote', 'attribution' => 'Famous Person', 'citetitle' => 'Famous Book (2001)' }
 #
 class AttributeList
   BACKSLASH = '\\'
+  APOS = '\''
 
   # Public: Regular expressions for detecting the boundary of a value
   BoundaryRxs = {
     '"' => /.*?[^\\](?=")/,
-    '\'' => /.*?[^\\](?=')/,
+    APOS => /.*?[^\\](?=')/,
     ',' => /.*?(?=[ \t]*(,|$))/
   }
 
   # Public: Regular expressions for unescaping quoted characters
   EscapedQuotes = {
     '"' => '\\"',
-    '\'' => '\\\''
+    APOS => '\\\''
   }
 
   # Public: A regular expression for an attribute name (approx. name token from XML)
@@ -43,11 +43,8 @@ class AttributeList
 
   BlankRx = /[ \t]+/
 
-  # Public: Regular expressions for skipping blanks and delimiters
-  SkipRxs = {
-    :blank => BlankRx,
-    ',' => /[ \t]*(,|$)/
-  }
+  # Public: Regular expressions for skipping delimiters
+  SkipRxs = { ',' => /[ \t]*(,|$)/ }
 
   def initialize source, block = nil, delimiter = ','
     @scanner = ::StringScanner.new source
@@ -97,6 +94,8 @@ class AttributeList
     attributes
   end
 
+  private
+
   def parse_attribute index = 0, pos_attrs = []
     single_quoted_value = false
     skip_blank
@@ -105,10 +104,10 @@ class AttributeList
       name = parse_attribute_value @scanner.get_byte
       value = nil
     # example: 'quote'
-    elsif first == '\''
+    elsif first == APOS
       name = parse_attribute_value @scanner.get_byte
       value = nil
-      single_quoted_value = true
+      single_quoted_value = true unless name.start_with? APOS
     else
       name = scan_name
 
@@ -135,12 +134,12 @@ class AttributeList
           if (c = @scanner.get_byte) == '"'
             value = parse_attribute_value c
           # example: foo='bar' || foo='ba\'zaar' || foo='ba"zaar'
-          elsif c == '\''
+          elsif c == APOS
             value = parse_attribute_value c
-            single_quoted_value = true
+            single_quoted_value = true unless value.start_with? APOS
           # example: foo=,
           elsif c == @delimiter
-            value = nil
+            value = ''
           # example: foo=bar (all spaces ignored)
           else
             value = %(#{c}#{scan_to_delimiter})
@@ -226,6 +225,5 @@ class AttributeList
   def scan_to_quote quote
     @scanner.scan BoundaryRxs[quote]
   end
-
 end
 end

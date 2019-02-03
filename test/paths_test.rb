@@ -1,8 +1,4 @@
-# encoding: UTF-8
-unless defined? ASCIIDOCTOR_PROJECT_DIR
-  $: << File.dirname(__FILE__); $:.uniq!
-  require 'test_helper'
-end
+require_relative 'test_helper'
 
 context 'Path Resolver' do
   context 'Web Paths' do
@@ -104,34 +100,52 @@ context 'Path Resolver' do
 
   context 'System Paths' do
     JAIL = '/home/doctor/docs'
+    default_logger = Asciidoctor::LoggerManager.logger
 
     def setup
       @resolver = Asciidoctor::PathResolver.new
+      @logger = (Asciidoctor::LoggerManager.logger = Asciidoctor::MemoryLogger.new)
     end
 
+    teardown do
+      Asciidoctor::LoggerManager.logger = default_logger
+    end
+
+    test 'raises security error if jail is not an absolute path' do
+      begin
+        @resolver.system_path('images/tiger.png', '/etc', 'foo')
+        flunk 'Expecting SecurityError to be raised'
+      rescue SecurityError
+      end
+    end
+
+    #test 'raises security error if jail is not a canoncial path' do
+    #  begin
+    #    @resolver.system_path('images/tiger.png', '/etc', %(#{JAIL}/../foo))
+    #    flunk 'Expecting SecurityError to be raised'
+    #  rescue SecurityError
+    #  end
+    #end
+
     test 'prevents access to paths outside of jail' do
-      result, warnings = redirect_streams do |_, err|
-        [(@resolver.system_path '../../../../../css', %(#{JAIL}/assets/stylesheets), JAIL), err.string]
-      end
+      result = @resolver.system_path '../../../../../css', %(#{JAIL}/assets/stylesheets), JAIL
       assert_equal %(#{JAIL}/css), result
-      assert_includes warnings, 'path has illegal reference to ancestor of jail'
+      assert_message @logger, :WARN, 'path has illegal reference to ancestor of jail; recovering automatically'
 
-      result, warnings = redirect_streams do |_, err|
-        [(@resolver.system_path '/../../../../../css', %(#{JAIL}/assets/stylesheets), JAIL), err.string]
-      end
+      @logger.clear
+      result = @resolver.system_path '/../../../../../css', %(#{JAIL}/assets/stylesheets), JAIL
       assert_equal %(#{JAIL}/css), result
-      assert_includes warnings, 'path has illegal reference to ancestor of jail'
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
 
-      result, warnings = redirect_streams do |_, err|
-        [(@resolver.system_path '../../../css', '../../..', JAIL), err.string]
-      end
+      @logger.clear
+      result = @resolver.system_path '../../../css', '../../..', JAIL
       assert_equal %(#{JAIL}/css), result
-      assert_includes warnings, 'path has illegal reference to ancestor of jail'
+      assert_message @logger, :WARN, 'path has illegal reference to ancestor of jail; recovering automatically'
     end
 
     test 'throws exception for illegal path access if recover is false' do
       begin
-        @resolver.system_path('../../../../../css', "#{JAIL}/assets/stylesheets", JAIL, :recover => false)
+        @resolver.system_path('../../../../../css', "#{JAIL}/assets/stylesheets", JAIL, recover: false)
         flunk 'Expecting SecurityError to be raised'
       rescue SecurityError
       end
@@ -142,15 +156,39 @@ context 'Path Resolver' do
       assert_equal "#{JAIL}/assets/stylesheets", @resolver.system_path(nil, "#{JAIL}/assets/stylesheets", JAIL)
     end
 
+    test 'expands parent references in start path if target is empty' do
+      assert_equal "#{JAIL}/stylesheets", @resolver.system_path('', "#{JAIL}/assets/../stylesheets", JAIL)
+    end
+
+    test 'expands parent references in start path if target is not empty' do
+      assert_equal "#{JAIL}/stylesheets/site.css", @resolver.system_path('site.css', "#{JAIL}/assets/../stylesheets", JAIL)
+    end
+
     test 'resolves start path if target is dot' do
       assert_equal "#{JAIL}/assets/stylesheets", @resolver.system_path('.', "#{JAIL}/assets/stylesheets", JAIL)
       assert_equal "#{JAIL}/assets/stylesheets", @resolver.system_path('./', "#{JAIL}/assets/stylesheets", JAIL)
     end
 
-    test 'treats absolute target as relative when jail is specified' do
-      assert_equal "#{JAIL}/assets/stylesheets", @resolver.system_path('/', "#{JAIL}/assets/stylesheets", JAIL)
-      assert_equal "#{JAIL}/assets/stylesheets/foo", @resolver.system_path('/foo', "#{JAIL}/assets/stylesheets", JAIL)
-      assert_equal "#{JAIL}/assets/foo", @resolver.system_path('/../foo', "#{JAIL}/assets/stylesheets", JAIL)
+    test 'treats absolute target outside of jail as relative when jail is specified' do
+      result = @resolver.system_path '/', "#{JAIL}/assets/stylesheets", JAIL
+      assert_equal JAIL, result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+
+      @logger.clear
+      result = @resolver.system_path '/foo', "#{JAIL}/assets/stylesheets", JAIL
+      assert_equal "#{JAIL}/foo", result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+
+      @logger.clear
+      result = @resolver.system_path '/../foo', "#{JAIL}/assets/stylesheets", JAIL
+      assert_equal "#{JAIL}/foo", result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+
+      @logger.clear
+      @resolver.file_separator = '\\'
+      result = @resolver.system_path 'baz.adoc', 'C:/foo', 'C:/bar'
+      assert_equal 'C:/bar/baz.adoc', result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
     end
 
     test 'allows use of absolute target or start if resolved path is sub-path of jail' do
@@ -159,6 +197,9 @@ context 'Path Resolver' do
       assert_equal "#{JAIL}/my/path", @resolver.system_path('', "#{JAIL}/my/path", JAIL)
       assert_equal "#{JAIL}/my/path", @resolver.system_path(nil, "#{JAIL}/my/path", JAIL)
       assert_equal "#{JAIL}/my/path", @resolver.system_path('path', "#{JAIL}/my", JAIL)
+      assert_equal '/foo/bar/baz.adoc', @resolver.system_path('/foo/bar/baz.adoc', nil, '/')
+      assert_equal '/foo/bar/baz.adoc', @resolver.system_path('baz.adoc', '/foo/bar', '/')
+      assert_equal '/foo/bar/baz.adoc', @resolver.system_path('baz.adoc', 'foo/bar', '/')
     end
 
     test 'uses jail path if start path is empty' do
@@ -166,18 +207,57 @@ context 'Path Resolver' do
       assert_equal "#{JAIL}/images/tiger.png", @resolver.system_path('images/tiger.png', nil, JAIL)
     end
 
-    test 'raises security error if start is not contained within jail' do
+    test 'warns if start is not contained within jail' do
+      result = @resolver.system_path 'images/tiger.png', '/etc', JAIL
+      assert_equal %(#{JAIL}/images/tiger.png), result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+
+      @logger.clear
+      result = @resolver.system_path '.', '/etc', JAIL
+      assert_equal JAIL, result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+
+      @logger.clear
+      @resolver.file_separator = '\\'
+      result = @resolver.system_path '.', 'C:/foo', 'C:/bar'
+      assert_equal 'C:/bar', result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+    end
+
+    test 'allows start path to be parent of jail if resolved target is inside jail' do
+      assert_equal "#{JAIL}/foo/path", @resolver.system_path('foo/path', JAIL, "#{JAIL}/foo")
+      @resolver.file_separator = '\\'
+      assert_equal "C:/dev/project/README.adoc", @resolver.system_path('project/README.adoc', 'C:/dev', 'C:/dev/project')
+    end
+
+    test 'relocates target to jail if resolved value fails outside of jail' do
+      result = @resolver.system_path 'bar/baz.adoc', JAIL, "#{JAIL}/foo"
+      assert_equal %(#{JAIL}/foo/bar/baz.adoc), result
+      assert_message @logger, :WARN, 'path is outside of jail; recovering automatically'
+
+      @logger.clear
+      @resolver.file_separator = '\\'
+      result = @resolver.system_path 'bar/baz.adoc', 'D:/', 'C:/foo'
+      assert_equal 'C:/foo/bar/baz.adoc', result
+      assert_message @logger, :WARN, '~outside of jail root'
+    end
+
+    test 'raises security error if start is not contained within jail and recover is disabled' do
       begin
-        @resolver.system_path('images/tiger.png', '/etc', JAIL)
+        @resolver.system_path('images/tiger.png', '/etc', JAIL, recover: false)
         flunk 'Expecting SecurityError to be raised'
       rescue SecurityError
       end
 
       begin
-        @resolver.system_path('.', '/etc', JAIL)
+        @resolver.system_path('.', '/etc', JAIL, recover: false)
         flunk 'Expecting SecurityError to be raised'
       rescue SecurityError
       end
+    end
+
+    test 'expands parent references in absolute path if jail is not specified' do
+      assert_equal '/etc/stylesheet.css', @resolver.system_path('/usr/share/../../etc/stylesheet.css')
     end
 
     test 'resolves absolute directory if jail is not specified' do
@@ -192,8 +272,25 @@ context 'Path Resolver' do
       assert_equal '/usr/share/assets/stylesheet.css', @resolver.system_path('assets/stylesheet.css', '/usr/share')
     end
 
-    test 'resolves absolute UNC path if start is absolute and target is relative' do
+    test 'File.dirname preserves UNC path root on Windows' do
+      assert_equal File.dirname('\\\\server\\docs\\file.html'), '\\\\server\\docs'
+    end if windows?
+
+    test 'File.dirname preserves posix-style UNC path root on Windows' do
+      assert_equal File.dirname('//server/docs/file.html'), '//server/docs'
+    end if windows?
+
+    test 'resolves UNC path if start is absolute and target is relative' do
       assert_equal '//QA/c$/users/asciidoctor/assets/stylesheet.css', @resolver.system_path('assets/stylesheet.css', '//QA/c$/users/asciidoctor')
+    end
+
+    test 'resolves UNC path if target is UNC path' do
+      @resolver.file_separator = '\\'
+      assert_equal '//server/docs/output.html', @resolver.system_path('\\\\server\\docs\\output.html')
+    end
+
+    test 'resolves UNC path if target is posix-style UNC path' do
+      assert_equal '//server/docs/output.html', @resolver.system_path('//server/docs/output.html')
     end
 
     test 'resolves relative target relative to current directory if start is empty' do
@@ -209,16 +306,15 @@ context 'Path Resolver' do
       assert_equal "#{pwd}/.images/tiger.png", @resolver.system_path('.images/tiger.png', nil)
     end
 
-    test 'resolves and normalizes start with target is empty' do
+    test 'resolves and normalizes start when target is empty' do
       pwd = File.expand_path Dir.pwd
       assert_equal '/home/doctor/docs', (@resolver.system_path '', '/home/doctor/docs')
+      assert_equal '/home/doctor/docs', (@resolver.system_path '', '/home/doctor/./docs')
       assert_equal '/home/doctor/docs', (@resolver.system_path nil, '/home/doctor/docs')
+      assert_equal '/home/doctor/docs', (@resolver.system_path nil, '/home/doctor/./docs')
       assert_equal %(#{pwd}/assets/images), (@resolver.system_path nil, 'assets/images')
-      result, warnings = redirect_streams do |_, err|
-        [(@resolver.system_path '', '../assets/images', JAIL), err.string]
-      end
-      assert_equal %(#{JAIL}/assets/images), result
-      assert_includes warnings, 'path has illegal reference to ancestor of jail'
+      @resolver.system_path '', '../assets/images', JAIL
+      assert_message @logger, :WARN, 'path has illegal reference to ancestor of jail; recovering automatically'
     end
 
     test 'posixifies windows paths' do
@@ -231,17 +327,14 @@ context 'Path Resolver' do
 
       assert_equal 'C:/data/docs', (@resolver.system_path '..', 'C:\\data\\docs\\assets', 'C:\\data\\docs')
 
-      result, warnings = redirect_streams do |_, err|
-        [(@resolver.system_path '..\\..', 'C:\\data\\docs\\assets', 'C:\\data\\docs'), err.string]
-      end
+      result = @resolver.system_path '..\\..', 'C:\\data\\docs\\assets', 'C:\\data\\docs'
       assert_equal 'C:/data/docs', result
-      assert_includes warnings, 'path has illegal reference to ancestor of jail'
+      assert_message @logger, :WARN, 'path has illegal reference to ancestor of jail; recovering automatically'
 
-      result, warnings = redirect_streams do |_, err|
-        [(@resolver.system_path '..\\..\\css', 'C:\\data\\docs\\assets', 'C:\\data\\docs'), err.string]
-      end
+      @logger.clear
+      result = @resolver.system_path '..\\..\\css', 'C:\\data\\docs\\assets', 'C:\\data\\docs'
       assert_equal 'C:/data/docs/css', result
-      assert_includes warnings, 'path has illegal reference to ancestor of jail'
+      assert_message @logger, :WARN, 'path has illegal reference to ancestor of jail; recovering automatically'
     end
 
     test 'should calculate relative path' do
@@ -250,16 +343,23 @@ context 'Path Resolver' do
       assert_equal 'part1/chapter1/section1.adoc', @resolver.relative_path(filename, JAIL)
     end
 
-    test 'should resolve relative path to filename if does not share common root with base directory' do
-      filename = '/docs/partials'
+    test 'should resolve relative path to filename outside of base directory' do
+      filename = '/home/shared/partials'
       base_dir = '/home/user/docs'
       result = @resolver.relative_path filename, base_dir
-      assert_equal filename, result
+      assert_equal '../../shared/partials', result
     end
+
+    test 'should return original path if relative path cannot be computed' do
+      filename = 'D:/path/to/include/file.txt'
+      base_dir = 'C:/docs'
+      result = @resolver.relative_path filename, base_dir
+      assert_equal 'D:/path/to/include/file.txt', result
+    end if windows?
 
     test 'should resolve relative path relative to base dir in unsafe mode' do
       base_dir = fixture_path 'base'
-      doc = empty_document :base_dir => base_dir, :safe => Asciidoctor::SafeMode::UNSAFE
+      doc = empty_document base_dir: base_dir, safe: Asciidoctor::SafeMode::UNSAFE
       expected = ::File.join base_dir, 'images', 'tiger.png'
       actual = doc.normalize_system_path 'tiger.png', 'images'
       assert_equal expected, actual
@@ -267,7 +367,7 @@ context 'Path Resolver' do
 
     test 'should resolve absolute path as absolute in unsafe mode' do
       base_dir = fixture_path 'base'
-      doc = empty_document :base_dir => base_dir, :safe => Asciidoctor::SafeMode::UNSAFE
+      doc = empty_document base_dir: base_dir, safe: Asciidoctor::SafeMode::UNSAFE
       actual = doc.normalize_system_path 'tiger.png', '/etc/images'
       assert_equal '/etc/images/tiger.png', actual
     end

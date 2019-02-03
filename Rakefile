@@ -1,5 +1,3 @@
-require File.expand_path '../lib/asciidoctor/version', __FILE__
-
 def prepare_test_env
   # rather than hardcoding gc settings in test task,
   # could use https://gist.github.com/benders/788695
@@ -33,29 +31,14 @@ begin
   require 'cucumber/rake/task'
   Cucumber::Rake::Task.new(:features) do |t|
     t.cucumber_opts = %w(-f progress)
+    t.cucumber_opts << '--no-color' if ENV['CI']
   end
 rescue LoadError
 end
 
-def ci_setup_tasks
-  tasks = []
-  begin
-    require 'ci/reporter/rake/minitest'
-    tasks << 'ci:setup:minitest'
-    # FIXME reporter for Cucumber tests not activating
-    #require 'ci/reporter/rake/cucumber'
-    #tasks << 'ci:setup:cucumber'
-  rescue LoadError
-  end if ENV['SHIPPABLE'] && RUBY_VERSION >= '1.9.3'
-  tasks
-end
-
-desc 'Activates coverage and JUnit-style XML reports for tests'
-task :coverage => ci_setup_tasks do
-  # exclude coverage run for Ruby 1.8.7 or (disabled) if running on Travis CI
-  ENV['COVERAGE'] = 'true' if RUBY_VERSION >= '1.9.3' # && (ENV['SHIPPABLE'] || !ENV['TRAVIS_BUILD_ID'])
-  ENV['CI_REPORTS'] = 'shippable/testresults'
-  ENV['COVERAGE_REPORTS'] = 'shippable/codecoverage'
+desc 'Activates coverage'
+task :coverage do
+  ENV['COVERAGE'] = 'true' if RUBY_VERSION >= '1.9.3'
 end
 
 namespace :test do
@@ -63,63 +46,8 @@ namespace :test do
   task :all => [:test, :features]
 end
 
-=begin
-begin
-  require 'rdoc/task'
-  RDoc::Task.new do |rdoc|
-    rdoc.rdoc_dir = 'rdoc'
-    rdoc.title = "Asciidoctor #{Asciidoctor::VERSION}"
-    rdoc.markup = 'tomdoc' if rdoc.respond_to?(:markup)
-    rdoc.rdoc_files.include('LICENSE', 'lib/**/*.rb')
-  end
-rescue LoadError
-end
-=end
-
-begin
-  require 'yard'
-  require 'yard-tomdoc'
-  require './lib/asciidoctor'
-
-  # Prevent YARD from breaking command statements in literal paragraphs
-  class CommandBlockPostprocessor < Asciidoctor::Extensions::Postprocessor
-    def process document, output
-      output.gsub(/<pre>\$ (.+?)<\/pre>/m, '<pre class="command code"><span class="const">$</span> \1</pre>')
-    end
-  end
-  Asciidoctor::Extensions.register do
-    postprocessor CommandBlockPostprocessor
-  end
-
-  # register .adoc extension for AsciiDoc markup helper
-  YARD::Templates::Helpers::MarkupHelper::MARKUP_EXTENSIONS[:asciidoc] = %w(adoc)
-  YARD::Rake::YardocTask.new do |yard|
-    yard.files = %w(
-        lib/**/*.rb
-        -
-        CHANGELOG.adoc
-        CONTRIBUTING.adoc
-        LICENSE
-    )
-    # --no-highlight enabled to prevent verbatim blocks in AsciiDoc that begin with $ from being dropped
-    # need to patch htmlify method to not attempt to syntax highlight blocks (or fix what's wrong)
-    yard.options = (IO.readlines '.yardopts').map {|l| l.chomp.delete('"').split ' ', 2 }.flatten if ::File.file? '.yardopts'
-  end
-rescue LoadError
-end
-
 begin
   require 'bundler/gem_tasks'
-
-  # Enhance the release task to create an explicit commit for the release
-  #Rake::Task[:release].enhance [:commit_release]
-
-  # NOTE you don't need to push after updating version and committing locally
-  # WARNING no longer works; it's now necessary to get master in a state ready for tagging
-  task :commit_release do
-    Bundler::GemHelper.new.send(:guard_clean)
-    sh "git commit --allow-empty -a -m 'Release #{Asciidoctor::VERSION}'"
-  end
 rescue LoadError
 end
 
@@ -148,7 +76,7 @@ desc 'Trigger builds for all dependent projects on Travis CI'
     %w(
       asciidoctor/asciidoctor.js
       asciidoctor/asciidoctorj
-      asciidoctor/asciidoctorj/asciidoctorj-1.6.0
+      asciidoctor/asciidoctorj/asciidoctorj-1.5.x
       asciidoctor/asciidoctor-diagram
       asciidoctor/asciidoctor-reveal.js
     ).each do |project|

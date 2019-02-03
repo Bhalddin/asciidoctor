@@ -1,23 +1,89 @@
-# encoding: UTF-8
 module Asciidoctor
-# Public: Methods for parsing and converting AsciiDoc documents.
+# Public: The Document class represents a parsed AsciiDoc document.
 #
-# There are several strategies for getting the title of the document:
+# Document is the root node of a parsed AsciiDoc document. It provides an
+# abstract syntax tree (AST) that represents the structure of the AsciiDoc
+# document from which the Document object was parsed.
 #
-# doctitle - value of title attribute, if assigned and non-empty,
-#            otherwise title of first section in document, if present
-#            otherwise nil
-# name - an alias of doctitle
-# title - value of the title attribute, or nil if not present
-# first_section.title - title of first section in document, if present
-# header.title - title of section level 0
+# Although the constructor can be used to create an empty document object, more
+# commonly, you'll load the document object from AsciiDoc source using the
+# primary API methods, {Asciidoctor.load} or {Asciidoctor.load_file}. When
+# using one of these APIs, you almost always want to set the safe mode to
+# :safe (or :unsafe) to enable all of Asciidoctor's features.
 #
-# Keep in mind that you'll want to honor these document settings:
+#   Asciidoctor.load '= Hello, AsciiDoc!', safe: :safe
+#   # => Asciidoctor::Document { doctype: "article", doctitle: "Hello, Asciidoc!", blocks: 0 }
 #
-# notitle  - The h1 heading should not be shown
-# noheader - The header block (h1 heading, author, revision info) should not be shown
-# nofooter - the footer block should not be shown
+# Instances of this class can be used to extract information from the document
+# or alter its structure. As such, the Document object is most often used in
+# extensions and by integrations.
+#
+# The most basic usage of the Document object is to retrieve the document's
+# title.
+#
+#   source = '= Document Title'
+#   document = Asciidoctor.load source, safe: :safe
+#   document.doctitle
+#   # => 'Document Title'
+#
+# If the document has no title, the {Document#doctitle} method returns the
+# title of the first section. If that check falls through, you can have the
+# method return a fallback value (the value of the untitled-label attribute).
+#
+#   Asciidoctor.load('no doctitle', safe: :safe).doctitle use_fallback: true
+#   # => "Untitled"
+#
+# You can also use the Document object to access document attributes defined in
+# the header, such as the author and doctype.
+#
+#   source = '= Document Title
+#   Author Name
+#   :doctype: book'
+#   document = Asciidoctor.load source, safe: :safe
+#   document.author
+#   # => 'Author Name'
+#   document.doctype
+#   # => 'book'
+#
+# You can retrieve arbitrary document attributes defined in the header using
+# {Document#attr} or check for the existence of one using {Document#attr?}:
+#
+#   source = '= Asciidoctor
+#   :uri-project: https://asciidoctor.org'
+#   document = Asciidoctor.load source, safe: :safe
+#   document.attr 'uri-project'
+#   # => 'https://asciidoctor.org'
+#   document.attr? 'icons'
+#   # => false
+#
+# Starting at the Document object, you can begin walking the document tree using
+# the {Document#blocks} method:
+#
+#   source = 'paragraph contents
+#
+#   [sidebar]
+#   sidebar contents'
+#   doc = Asciidoctor.load source, safe: :safe
+#   doc.blocks.map {|block| block.context }
+#   # => [:paragraph, :sidebar]
+#
+# You can discover block nodes at any depth in the tree using the
+# {AbstractBlock#find_by} method.
+#
+#   source = '****
+#   paragraph in sidebar
+#   ****'
+#   doc = Asciidoctor.load source, safe: :safe
+#   doc.find_by(context: :paragraph).map {|block| block.context }
+#   # => [:paragraph]
+#
+# Loading a document object is the first step in the conversion process. You
+# can take the process to completion by calling the {Document#convert} method.
 class Document < AbstractBlock
+
+  ImageReference = ::Struct.new :target, :imagesdir do
+    alias to_s target
+  end
 
   Footnote = ::Struct.new :index, :id, :text
 
@@ -70,6 +136,9 @@ class Document < AbstractBlock
     end
   end
 
+  # Public: The Author class represents information about an author extracted from document attributes
+  Author = ::Struct.new :name, :firstname, :middlename, :lastname, :initials, :email
+
   # Public A read-only integer value indicating the level of security that
   # should be enforced while processing this document. The value must be
   # set in the Document constructor using the :safe option.
@@ -83,9 +152,9 @@ class Document < AbstractBlock
   #
   # A value of 10 (SERVER) disallows the document from setting attributes that
   # would affect the conversion of the document, in addition to all the security
-  # features of SafeMode::SAFE. For instance, this value disallows changing the
-  # backend or the source-highlighter using an attribute defined in the source
-  # document. This is the most fundamental level of security for server-side
+  # features of SafeMode::SAFE. For instance, this level forbids changing the
+  # backend or source-highlighter using an attribute defined in the source
+  # document header. This is the most fundamental level of security for server
   # deployments (hence the name).
   #
   # A value of 20 (SECURE) disallows the document from attempting to read files
@@ -97,7 +166,7 @@ class Document < AbstractBlock
   # trusted content into the document).
   #
   # Since Asciidoctor is aiming for wide adoption, 20 (SECURE) is the default
-  # value and is recommended for server-side deployments.
+  # value and is recommended for server deployments.
   #
   # A value of 100 (PARANOID) is planned to disallow the use of passthrough
   # macros and prevents the document from setting any known attributes in
@@ -155,8 +224,14 @@ class Document < AbstractBlock
   # Public: Get the Reader associated with this document
   attr_reader :reader
 
+  # Public: Get/Set the PathResolver instance used to resolve paths in this Document.
+  attr_reader :path_resolver
+
   # Public: Get the Converter associated with this document
   attr_reader :converter
+
+  # Public: Get the SyntaxHighlighter associated with this document
+  attr_reader :syntax_highlighter
 
   # Public: Get the activated Extensions::Registry associated with this document.
   attr_reader :extensions
@@ -180,10 +255,8 @@ class Document < AbstractBlock
     if (parent_doc = options.delete :parent)
       @parent_document = parent_doc
       options[:base_dir] ||= parent_doc.base_dir
-      @catalog = parent_doc.catalog.inject({}) do |accum, (key, table)|
-        accum[key] = (key == :footnotes ? [] : table)
-        accum
-      end
+      options[:catalog_assets] = true if parent_doc.options[:catalog_assets]
+      @catalog = parent_doc.catalog.dup.tap {|catalog| catalog[:footnotes] = [] }
       # QUESTION should we support setting attribute in parent document from nested document?
       # NOTE we must dup or else all the assignments to the overrides clobbers the real attributes
       @attribute_overrides = attr_overrides = parent_doc.attributes.dup
@@ -194,41 +267,50 @@ class Document < AbstractBlock
       attr_overrides.delete 'toc-position'
       @safe = parent_doc.safe
       @attributes['compat-mode'] = '' if (@compat_mode = parent_doc.compat_mode)
+      @outfilesuffix = parent_doc.outfilesuffix
       @sourcemap = parent_doc.sourcemap
+      @timings = nil
+      @path_resolver = parent_doc.path_resolver
       @converter = parent_doc.converter
       initialize_extensions = false
       @extensions = parent_doc.extensions
+      @syntax_highlighter = parent_doc.syntax_highlighter
     else
       @parent_document = nil
       @catalog = {
-        :ids => {},
-        :refs => {},
-        :footnotes => [],
-        :links => [],
-        :images => [],
-        :indexterms => [],
-        :callouts => Callouts.new,
-        :includes => ::Set.new,
+        ids: {},
+        refs: {},
+        footnotes: [],
+        links: [],
+        images: [],
+        indexterms: [],
+        callouts: Callouts.new,
+        includes: {},
       }
       # copy attributes map and normalize keys
       # attribute overrides are attributes that can only be set from the commandline
       # a direct assignment effectively makes the attribute a constant
       # a nil value or name with leading or trailing ! will result in the attribute being unassigned
-      attr_overrides = {}
-      (options[:attributes] || {}).each do |key, value|
-        if key.start_with? '!'
-          key = key[1..-1]
-          value = nil
+      @attribute_overrides = attr_overrides = {}
+      (options[:attributes] || {}).each do |key, val|
+        if key.end_with? '@'
+          if key.start_with? '!'
+            key, val = (key.slice 1, key.length - 2), false
+          elsif key.end_with? '!@'
+            key, val = (key.slice 0, key.length - 2), false
+          else
+            key, val = key.chop, %(#{val}@)
+          end
+        elsif key.start_with? '!'
+          key, val = (key.slice 1, key.length), val == '@' ? false : nil
         elsif key.end_with? '!'
-          key = key.chop
-          value = nil
+          key, val = key.chop, val == '@' ? false : nil
         end
-        attr_overrides[key.downcase] = value
+        attr_overrides[key.downcase] = val
       end
       if (to_file = options[:to_file])
         attr_overrides['outfilesuffix'] = ::File.extname to_file
       end
-      @attribute_overrides = attr_overrides
       # safely resolve the safe mode from const, int or string
       if !(safe_mode = options[:safe])
         @safe = SafeMode::SECURE
@@ -236,22 +318,18 @@ class Document < AbstractBlock
         # be permissive in case API user wants to define new levels
         @safe = safe_mode
       else
-        # NOTE: not using infix rescue for performance reasons, see https://github.com/jruby/jruby/issues/1816
-        begin
-          @safe = SafeMode.value_for_name safe_mode.to_s
-        rescue
-          @safe = SafeMode::SECURE
-        end
+        @safe = (SafeMode.value_for_name safe_mode) rescue SafeMode::SECURE
       end
       @compat_mode = attr_overrides.key? 'compat-mode'
       @sourcemap = options[:sourcemap]
-      @converter = nil
+      @timings = options.delete :timings
+      @path_resolver = PathResolver.new
       initialize_extensions = defined? ::Asciidoctor::Extensions
-      @extensions = nil # initialize furthur down
+      @extensions = nil # initialize furthur down if initialize_extensions is true
     end
 
     @parsed = false
-    @header = nil
+    @header = @header_attributes = nil
     @counters = {}
     @attributes_modified = ::Set.new
     @docinfo_processor_extensions = {}
@@ -292,7 +370,7 @@ class Document < AbstractBlock
     attrs['toc-title'] = 'Table of Contents'
     #attrs['preface-title'] = 'Preface'
     attrs['section-refsig'] = 'Section'
-    #attrs['part-refsig'] = 'Part'
+    attrs['part-refsig'] = 'Part'
     attrs['chapter-refsig'] = 'Chapter'
     attrs['appendix-caption'] = attrs['appendix-refsig'] = 'Appendix'
     attrs['untitled-label'] = 'Untitled'
@@ -300,7 +378,7 @@ class Document < AbstractBlock
     attrs['last-update-label'] = 'Last updated'
 
     attr_overrides['asciidoctor'] = ''
-    attr_overrides['asciidoctor-version'] = VERSION
+    attr_overrides['asciidoctor-version'] = ::Asciidoctor::VERSION
 
     attr_overrides['safe-mode-name'] = (safe_mode_name = SafeMode.name_for_value @safe)
     attr_overrides["safe-mode-#{safe_mode_name}"] = ''
@@ -317,18 +395,16 @@ class Document < AbstractBlock
     # legacy support for numbered attribute
     attr_overrides['sectnums'] = attr_overrides.delete 'numbered' if attr_overrides.key? 'numbered'
 
-    # if the base_dir option is specified, it overrides docdir as the root for relative paths
-    # otherwise, the base_dir is the directory of the source file (docdir) or the current
-    # directory of the input is a string
-    if options[:base_dir]
-      @base_dir = attr_overrides['docdir'] = ::File.expand_path(options[:base_dir])
+    # If the base_dir option is specified, it overrides docdir and is used as the root for relative
+    # paths. Otherwise, the base_dir is the directory of the source file (docdir), if set, otherwise
+    # the current directory.
+    if (base_dir_val = options[:base_dir])
+      @base_dir = (attr_overrides['docdir'] = ::File.expand_path base_dir_val)
+    elsif attr_overrides['docdir']
+      @base_dir = attr_overrides['docdir']
     else
-      if attr_overrides['docdir']
-        @base_dir = attr_overrides['docdir'] = ::File.expand_path(attr_overrides['docdir'])
-      else
-        #warn 'asciidoctor: WARNING: setting base_dir is recommended when working with string documents' unless nested?
-        @base_dir = attr_overrides['docdir'] = ::File.expand_path(::Dir.pwd)
-      end
+      #logger.warn 'setting base_dir is recommended when working with string documents' unless nested?
+      @base_dir = attr_overrides['docdir'] = ::Dir.pwd
     end
 
     # allow common attributes backend and doctype to be set using options hash, coerce values to string
@@ -354,10 +430,8 @@ class Document < AbstractBlock
       if @safe >= SafeMode::SECURE
         attr_overrides['max-attribute-value-size'] = 4096 unless attr_overrides.key? 'max-attribute-value-size'
         # assign linkcss (preventing css embedding) unless explicitly disabled from the commandline or API
-        # effectively the same has "has key 'linkcss' and value == nil"
-        unless attr_overrides.fetch('linkcss', '').nil?
-          attr_overrides['linkcss'] = ''
-        end
+        #attr_overrides['linkcss'] = (attr_overrides.fetch 'linkcss', '') || nil
+        attr_overrides['linkcss'] = '' unless attr_overrides.key? 'linkcss'
         # restrict document from enabling icons
         attr_overrides['icons'] ||= nil
       end
@@ -367,18 +441,16 @@ class Document < AbstractBlock
     @max_attribute_value_size = (size = (attr_overrides['max-attribute-value-size'] ||= nil)) ? size.to_i.abs : nil
 
     attr_overrides.delete_if do |key, val|
-      verdict = false
-      # a nil value undefines the attribute
-      if val.nil?
-        attrs.delete(key)
-      else
-        # a value ending in @ indicates this attribute does not override
-        # an attribute with the same key in the document souce
+      if val
+        # a value ending in @ allows document to override value
         if ::String === val && (val.end_with? '@')
-          val = val.chop
-          verdict = true
+          val, verdict = val.chop, true
         end
         attrs[key] = val
+      else
+        # a nil or false value both unset the attribute; only a nil value locks it
+        attrs.delete key
+        verdict = val == false
       end
       verdict
     end
@@ -393,6 +465,7 @@ class Document < AbstractBlock
       # don't need to do the extra processing within our own document
       # FIXME line info isn't reported correctly within include files in nested document
       @reader = Reader.new data, options[:cursor]
+      @source_location = @reader.cursor if @sourcemap
 
       # Now parse the lines in the reader into blocks
       # Eagerly parse (for now) since a subdocument is not a publicly accessible object
@@ -422,14 +495,11 @@ class Document < AbstractBlock
       if (localdate = attrs['localdate'])
         localyear = (attrs['localyear'] ||= ((localdate.index '-') == 4 ? (localdate.slice 0, 4) : nil))
       else
-        localdate = attrs['localdate'] = (now.strftime '%Y-%m-%d')
+        localdate = attrs['localdate'] = now.strftime '%F'
         localyear = (attrs['localyear'] ||= now.year.to_s)
       end
-      localtime = (attrs['localtime'] ||= begin
-          now.strftime '%H:%M:%S %Z'
-        rescue # Asciidoctor.js fails if timezone string has characters outside basic Latin (see asciidoctor.js#23)
-          now.strftime '%H:%M:%S %z'
-        end)
+      # %Z is OS dependent and may contain characters that aren't UTF-8 encoded (see asciidoctor#2770 and asciidoctor.js#23)
+      localtime = (attrs['localtime'] ||= now.strftime %(%T #{now.utc_offset == 0 ? 'UTC' : '%z'}))
       attrs['localdatetime'] ||= %(#{localdate} #{localtime})
 
       # docdate, doctime and docdatetime should default to
@@ -445,8 +515,8 @@ class Document < AbstractBlock
 
       if initialize_extensions
         if (ext_registry = options[:extension_registry])
-          # QUESTION should we warn the value type of the option is not a registry
-          if Extensions::Registry === ext_registry || (::RUBY_ENGINE_JRUBY &&
+          # QUESTION should we warn if the value type of this option is not a registry
+          if Extensions::Registry === ext_registry || ((defined? ::AsciidoctorJ::Extensions::ExtensionRegistry) &&
               ::AsciidoctorJ::Extensions::ExtensionRegistry === ext_registry)
             @extensions = ext_registry.activate self
           end
@@ -457,7 +527,8 @@ class Document < AbstractBlock
         end
       end
 
-      @reader = PreprocessorReader.new self, data, (Reader::Cursor.new attrs['docfile'], @base_dir), :normalize => true
+      @reader = PreprocessorReader.new self, data, (Reader::Cursor.new attrs['docfile'], @base_dir), normalize: true
+      @source_location = @reader.cursor if @sourcemap
     end
   end
 
@@ -479,7 +550,8 @@ class Document < AbstractBlock
       doc = self
       # create reader if data is provided (used when data is not known at the time the Document object is created)
       if data
-        @reader = PreprocessorReader.new doc, data, (Reader::Cursor.new @attributes['docfile'], @base_dir), :normalize => true
+        @reader = PreprocessorReader.new doc, data, (Reader::Cursor.new @attributes['docfile'], @base_dir), normalize: true
+        @source_location = @reader.cursor if @sourcemap
       end
 
       if (exts = @parent_document ? nil : @extensions) && exts.preprocessors?
@@ -489,7 +561,7 @@ class Document < AbstractBlock
       end
 
       # Now parse the lines in the reader into blocks
-      Parser.parse @reader, doc, :header_only => @options[:parse_header_only]
+      Parser.parse @reader, doc, header_only: @options[:parse_header_only]
 
       # should we call sort of post-parse function?
       restore_attributes
@@ -516,11 +588,11 @@ class Document < AbstractBlock
   def counter name, seed = nil
     return @parent_document.counter name, seed if @parent_document
     if (attr_seed = !(attr_val = @attributes[name]).nil_or_empty?) && (@counters.key? name)
-      @attributes[name] = @counters[name] = (nextval attr_val)
+      @attributes[name] = @counters[name] = Helpers.nextval attr_val
     elsif seed
-      @attributes[name] = @counters[name] = (seed == seed.to_i.to_s ? seed.to_i : seed)
+      @attributes[name] = @counters[name] = seed == seed.to_i.to_s ? seed.to_i : seed
     else
-      @attributes[name] = @counters[name] = nextval(attr_seed ? attr_val : 0)
+      @attributes[name] = @counters[name] = Helpers.nextval attr_seed ? attr_val : 0
     end
   end
 
@@ -536,26 +608,7 @@ class Document < AbstractBlock
   # Deprecated: Map old counter_increment method to increment_counter for backwards compatibility
   alias counter_increment increment_and_store_counter
 
-  # Internal: Get the next value in the sequence.
-  #
-  # Handles both integer and character sequences.
-  #
-  # current - the value to increment as a String or Integer
-  #
-  # returns the next value in the sequence according to the current value's type
-  def nextval(current)
-    if ::Integer === current
-      current + 1
-    else
-      intval = current.to_i
-      if intval.to_s != current.to_s
-        (current[0].ord + 1).chr
-      else
-        intval + 1
-      end
-    end
-  end
-
+  # Public: Register a reference in the document catalog
   def register type, value
     case type
     when :ids # deprecated
@@ -570,7 +623,9 @@ class Document < AbstractBlock
     when :footnotes, :indexterms
       @catalog[type] << value
     else
-      @catalog[type] << value if @options[:catalog_assets]
+      if @options[:catalog_assets]
+        @catalog[type] << (type == :images ? (ImageReference.new value[0], value[1]) : value)
+      end
     end
   end
 
@@ -619,9 +674,17 @@ class Document < AbstractBlock
     doctitle
   end
 
+  # Public: Set the title on the document header
+  #
+  # Set the title of the document header to the specified value. If the header
+  # does not exist, it is first created.
+  #
+  # title - the String title to assign as the title of the document header
+  #
+  # Returns the new [String] title assigned to the document header
   def title= title
     unless (sect = @header)
-      (sect = (@header = Section.new self, 0, false)).sectname = 'header'
+      (sect = (@header = Section.new self, 0)).sectname = 'header'
     end
     sect.title = title
   end
@@ -655,7 +718,7 @@ class Document < AbstractBlock
     end
 
     if (separator = opts[:partition])
-      Title.new val, opts.merge({ :separator => (separator == true ? @attributes['title-separator'] : separator) })
+      Title.new val, opts.merge({ separator: (separator == true ? @attributes['title-separator'] : separator) })
     elsif opts[:sanitize] && val.include?('<')
       val.gsub(XmlSanitizeRx, '').squeeze(' ').strip
     else
@@ -669,6 +732,27 @@ class Document < AbstractBlock
   # returns the full name of the author as a String
   def author
     @attributes['author']
+  end
+
+  # Public: Convenience method to retrieve the authors of this document as an Array of Author objects.
+  #
+  # This method is backed by the author-related attributes on the document.
+  #
+  # returns the authors of this document as an Array
+  def authors
+    if (attrs = @attributes).key? 'author'
+      authors = [(Author.new attrs['author'], attrs['firstname'], attrs['middlename'], attrs['lastname'], attrs['authorinitials'], attrs['email'])]
+      if (num_authors = attrs['authorcount'] || 0) > 1
+        idx = 1
+        while idx < num_authors
+          idx += 1
+          authors << (Author.new attrs[%(author_#{idx})], attrs[%(firstname_#{idx})], attrs[%(middlename_#{idx})], attrs[%(lastname_#{idx})], attrs[%(authorinitials_#{idx})], attrs[%(email_#{idx})])
+        end
+      end
+      authors
+    else
+      []
+    end
   end
 
   # Public: Convenience method to retrieve the document attribute 'revdate'
@@ -711,8 +795,8 @@ class Document < AbstractBlock
     super
   end
 
-  # Internal: called after the header has been parsed and before the content
-  # will be parsed.
+  # Internal: Called by the parser after parsing the header and before parsing
+  # the body, even if no header is found.
   #--
   # QUESTION should we invoke the TreeProcessors here, passing in a phase?
   # QUESTION is finalize_header the right name?
@@ -723,97 +807,7 @@ class Document < AbstractBlock
     unrooted_attributes
   end
 
-  # Internal: Branch the attributes so that the original state can be restored
-  # at a future time.
-  def save_attributes
-    # enable toc and sectnums (i.e., numbered) by default in DocBook backend
-    # NOTE the attributes_modified should go away once we have a proper attribute storage & tracking facility
-    if (attrs = @attributes)['basebackend'] == 'docbook'
-      attrs['toc'] = '' unless attribute_locked?('toc') || @attributes_modified.include?('toc')
-      attrs['sectnums'] = '' unless attribute_locked?('sectnums') || @attributes_modified.include?('sectnums')
-    end
-
-    unless attrs.key?('doctitle') || !(val = doctitle)
-      attrs['doctitle'] = val
-    end
-
-    # css-signature cannot be updated after header attributes are processed
-    @id = attrs['css-signature'] unless @id
-
-    toc_position_val = if (toc_val = (attrs.delete('toc2') ? 'left' : attrs['toc']))
-      # toc-placement allows us to separate position from using fitted slot vs macro
-      (toc_placement = attrs.fetch('toc-placement', 'macro')) && toc_placement != 'auto' ? toc_placement : attrs['toc-position']
-    else
-      nil
-    end
-
-    if toc_val && (!toc_val.empty? || !toc_position_val.nil_or_empty?)
-      default_toc_position = 'left'
-      # TODO rename toc2 to aside-toc
-      default_toc_class = 'toc2'
-      if !toc_position_val.nil_or_empty?
-        position = toc_position_val
-      elsif !toc_val.empty?
-        position = toc_val
-      else
-        position = default_toc_position
-      end
-      attrs['toc'] = ''
-      attrs['toc-placement'] = 'auto'
-      case position
-      when 'left', '<', '&lt;'
-        attrs['toc-position'] = 'left'
-      when 'right', '>', '&gt;'
-        attrs['toc-position'] = 'right'
-      when 'top', '^'
-        attrs['toc-position'] = 'top'
-      when 'bottom', 'v'
-        attrs['toc-position'] = 'bottom'
-      when 'preamble', 'macro'
-        attrs['toc-position'] = 'content'
-        attrs['toc-placement'] = position
-        default_toc_class = nil
-      else
-        attrs.delete 'toc-position'
-        default_toc_class = nil
-      end
-      attrs['toc-class'] ||= default_toc_class if default_toc_class
-    end
-
-    if (@compat_mode = attrs.key? 'compat-mode')
-      attrs['source-language'] = attrs['language'] if attrs.key? 'language'
-    end
-
-    # NOTE pin the outfilesuffix after the header is parsed
-    @outfilesuffix = attrs['outfilesuffix']
-
-    @header_attributes = attrs.dup
-
-    # unfreeze "flexible" attributes
-    unless @parent_document
-      FLEXIBLE_ATTRIBUTES.each do |name|
-        # turning a flexible attribute off should be permanent
-        # (we may need more config if that's not always the case)
-        if @attribute_overrides.key?(name) && @attribute_overrides[name]
-          @attribute_overrides.delete(name)
-        end
-      end
-    end
-  end
-
-  # Internal: Restore the attributes to the previously saved state (attributes in header)
-  def restore_attributes
-    @catalog[:callouts].rewind unless @parent_document
-    # QUESTION shouldn't this be a dup in case we convert again?
-    @attributes = @header_attributes
-  end
-
-  # Internal: Delete any attributes stored for playback
-  def clear_playback_attributes(attributes)
-    attributes.delete(:attribute_entries)
-  end
-
-  # Internal: Replay attribute assignments at the block level
+  # Public: Replay attribute assignments at the block level
   def playback_attributes(block_attributes)
     if block_attributes.key? :attribute_entries
       block_attributes[:attribute_entries].each do |entry|
@@ -829,6 +823,12 @@ class Document < AbstractBlock
     end
   end
 
+  # Public: Restore the attributes to the previously saved state (attributes in header)
+  def restore_attributes
+    @catalog[:callouts].rewind unless @parent_document
+    @attributes.replace @header_attributes
+  end
+
   # Public: Set the specified attribute on the document if the name is not locked
   #
   # If the attribute is locked, false is returned. Otherwise, the value is
@@ -839,13 +839,11 @@ class Document < AbstractBlock
   # name  - the String attribute name
   # value - the String attribute value; must not be nil (default: '')
   #
-  # Returns the resolved value if the attribute was set or false if it was not because it's locked.
+  # Returns the resolved value if the attribute was set or nil if it was not because it's locked.
   def set_attribute name, value = ''
-    if attribute_locked? name
-      false
-    else
+    unless attribute_locked? name
       if @max_attribute_value_size
-        resolved_value = (apply_attribute_value_subs value).limit_bytesize @max_attribute_value_size
+        resolved_value = Helpers.limit_bytesize (apply_attribute_value_subs value), @max_attribute_value_size
       else
         resolved_value = apply_attribute_value_subs value
       end
@@ -888,157 +886,33 @@ class Document < AbstractBlock
     @attribute_overrides.key?(name)
   end
 
-  # Internal: Apply substitutions to the attribute value
+  # Public: Assign a value to the specified attribute in the document header.
   #
-  # If the value is an inline passthrough macro (e.g., pass:<subs>[value]),
-  # apply the substitutions defined in <subs> to the value, or leave the value
-  # unmodified if no substitutions are specified.  If the value is not an
-  # inline passthrough macro, apply header substitutions to the value.
+  # The assignment will be visible when the header attributes are restored,
+  # typically between processor phases (e.g., between parse and convert).
   #
-  # value - The String attribute value on which to perform substitutions
+  # name      - The String attribute name to assign
+  # value     - The Object value to assign to the attribute (default: '')
+  # overwrite - A Boolean indicating whether to assign the attribute
+  #             if already present in the attributes Hash (default: true)
   #
-  # Returns The String value with substitutions performed
-  def apply_attribute_value_subs value
-    if AttributeEntryPassMacroRx =~ value
-      $1 ? (apply_subs $2, (resolve_pass_subs $1)) : $2
+  # Returns a [Boolean] indicating whether the assignment was performed
+  def set_header_attribute name, value = '', overwrite = true
+    attrs = @header_attributes || @attributes
+    if overwrite == false && (attrs.key? name)
+      false
     else
-      apply_header_subs value
+      attrs[name] = value
+      true
     end
-  end
-
-  # Public: Update the backend attributes to reflect a change in the active backend.
-  #
-  # This method also handles updating the related doctype attributes if the
-  # doctype attribute is assigned at the time this method is called.
-  #
-  # Returns the resolved String backend if updated, nothing otherwise.
-  def update_backend_attributes new_backend, force = nil
-    if force || (new_backend && new_backend != @backend)
-      current_backend, current_basebackend, current_doctype = @backend, (attrs = @attributes)['basebackend'], @doctype
-      if new_backend.start_with? 'xhtml'
-        attrs['htmlsyntax'] = 'xml'
-        new_backend = new_backend[1..-1]
-      elsif new_backend.start_with? 'html'
-        attrs['htmlsyntax'] = 'html' unless attrs['htmlsyntax'] == 'xml'
-      end
-      if (resolved_backend = BACKEND_ALIASES[new_backend])
-        new_backend = resolved_backend
-      end
-      if current_doctype
-        if current_backend
-          attrs.delete %(backend-#{current_backend})
-          attrs.delete %(backend-#{current_backend}-doctype-#{current_doctype})
-        end
-        attrs[%(backend-#{new_backend}-doctype-#{current_doctype})] = ''
-        attrs[%(doctype-#{current_doctype})] = ''
-      elsif current_backend
-        attrs.delete %(backend-#{current_backend})
-      end
-      attrs[%(backend-#{new_backend})] = ''
-      @backend = attrs['backend'] = new_backend
-      # (re)initialize converter
-      if Converter::BackendInfo === (@converter = create_converter)
-        new_basebackend = @converter.basebackend
-        attrs['outfilesuffix'] = @converter.outfilesuffix unless attribute_locked? 'outfilesuffix'
-        new_filetype = @converter.filetype
-      elsif @converter
-        new_basebackend = new_backend.sub TrailingDigitsRx, ''
-        if (new_outfilesuffix = DEFAULT_EXTENSIONS[new_basebackend])
-          new_filetype = new_outfilesuffix[1..-1]
-        else
-          new_outfilesuffix, new_basebackend, new_filetype = '.html', 'html', 'html'
-        end
-        attrs['outfilesuffix'] = new_outfilesuffix unless attribute_locked? 'outfilesuffix'
-      else
-        # NOTE ideally we shouldn't need the converter before the converter phase, but we do
-        raise ::NotImplementedError, %(asciidoctor: FAILED: missing converter for backend '#{new_backend}'. Processing aborted.)
-      end
-      if (current_filetype = attrs['filetype'])
-        attrs.delete %(filetype-#{current_filetype})
-      end
-      attrs['filetype'] = new_filetype
-      attrs[%(filetype-#{new_filetype})] = ''
-      if (page_width = DEFAULT_PAGE_WIDTHS[new_basebackend])
-        attrs['pagewidth'] = page_width
-      else
-        attrs.delete 'pagewidth'
-      end
-      if new_basebackend != current_basebackend
-        if current_doctype
-          if current_basebackend
-            attrs.delete %(basebackend-#{current_basebackend})
-            attrs.delete %(basebackend-#{current_basebackend}-doctype-#{current_doctype})
-          end
-          attrs[%(basebackend-#{new_basebackend}-doctype-#{current_doctype})] = ''
-        elsif current_basebackend
-          attrs.delete %(basebackend-#{current_basebackend})
-        end
-        attrs[%(basebackend-#{new_basebackend})] = ''
-        attrs['basebackend'] = new_basebackend
-      end
-      return new_backend
-    end
-  end
-
-  # TODO document me
-  #
-  # Returns the String doctype if updated, nothing otherwise.
-  def update_doctype_attributes new_doctype
-    if new_doctype && new_doctype != @doctype
-      current_backend, current_basebackend, current_doctype = @backend, (attrs = @attributes)['basebackend'], @doctype
-      if current_doctype
-        attrs.delete %(doctype-#{current_doctype})
-        if current_backend
-          attrs.delete %(backend-#{current_backend}-doctype-#{current_doctype})
-          attrs[%(backend-#{current_backend}-doctype-#{new_doctype})] = ''
-        end
-        if current_basebackend
-          attrs.delete %(basebackend-#{current_basebackend}-doctype-#{current_doctype})
-          attrs[%(basebackend-#{current_basebackend}-doctype-#{new_doctype})] = ''
-        end
-      else
-        attrs[%(backend-#{current_backend}-doctype-#{new_doctype})] = '' if current_backend
-        attrs[%(basebackend-#{current_basebackend}-doctype-#{new_doctype})] = '' if current_basebackend
-      end
-      attrs[%(doctype-#{new_doctype})] = ''
-      return @doctype = attrs['doctype'] = new_doctype
-    end
-  end
-
-  # TODO document me
-  def create_converter
-    converter_opts = {}
-    converter_opts[:htmlsyntax] = @attributes['htmlsyntax']
-    template_dirs = if (template_dir = @options[:template_dir])
-      converter_opts[:template_dirs] = [template_dir]
-    elsif (template_dirs = @options[:template_dirs])
-      converter_opts[:template_dirs] = template_dirs
-    end
-    if template_dirs
-      converter_opts[:template_cache] = @options.fetch :template_cache, true
-      converter_opts[:template_engine] = @options[:template_engine]
-      converter_opts[:template_engine_options] = @options[:template_engine_options]
-      converter_opts[:eruby] = @options[:eruby]
-      converter_opts[:safe] = @safe
-    end
-    if (converter = @options[:converter])
-      converter_factory = Converter::Factory.new ::Hash[backend, converter]
-    else
-      converter_factory = Converter::Factory.default false
-    end
-    # QUESTION should we honor the convert_opts?
-    # QUESTION should we pass through all options and attributes too?
-    #converter_opts.update opts
-    converter_factory.create backend, converter_opts
   end
 
   # Public: Convert the AsciiDoc document using the templates
   # loaded by the Converter. If a :template_dir is not specified,
   # or a template is missing, the converter will fall back to
   # using the appropriate built-in template.
-  #--
-  # QUESTION should we dup @header_attributes before converting?
   def convert opts = {}
+    @timings.start :convert if @timings
     parse unless @parsed
     unless @safe >= SafeMode::SERVER || opts.empty?
       # QUESTION should we store these on the Document object?
@@ -1051,7 +925,7 @@ class Document < AbstractBlock
     if doctype == 'inline'
       if (block = @blocks[0] || @header)
         if block.content_model == :compound || block.content_model == :empty
-          warn %(asciidoctor: WARNING: no inline candidate; use the inline doctype to convert a single paragragh, verbatim, or raw block)
+          logger.warn 'no inline candidate; use the inline doctype to convert a single paragragh, verbatim, or raw block'
         else
           output = block.content
         end
@@ -1069,6 +943,7 @@ class Document < AbstractBlock
       end
     end
 
+    @timings.record :convert if @timings
     output
   end
 
@@ -1079,24 +954,29 @@ class Document < AbstractBlock
   #
   # If the converter responds to :write, delegate the work of writing the file
   # to that method. Otherwise, write the output the specified file.
+  #
+  # Returns nothing
   def write output, target
+    @timings.start :write if @timings
     if Writer === @converter
       @converter.write output, target
     else
       if target.respond_to? :write
+        # QUESTION should we set encoding using target.set_encoding?
         unless output.nil_or_empty?
           target.write output.chomp
           # ensure there's a trailing endline
           target.write LF
         end
       else
-        ::IO.write target, output
+        ::File.write target, output, mode: FILE_WRITE_MODE
       end
       if @backend == 'manpage' && ::String === target && (@converter.respond_to? :write_alternate_pages)
         @converter.write_alternate_pages @attributes['mannames'], @attributes['manvolnum'], target
       end
-      nil
     end
+    @timings.record :write if @timings
+    nil
   end
 
 =begin
@@ -1137,10 +1017,7 @@ class Document < AbstractBlock
   # returns The contents of the docinfo file(s) or empty string if no files are
   # found or the safe mode is secure or greater.
   def docinfo location = :head, suffix = nil
-    if safe >= SafeMode::SECURE
-      ''
-    else
-      content = []
+    if safe < SafeMode::SECURE
       qualifier = %(-#{location}) unless location == :head
       suffix = @outfilesuffix unless suffix
 
@@ -1157,30 +1034,66 @@ class Document < AbstractBlock
       end
 
       if docinfo
+        content = []
         docinfo_file, docinfo_dir, docinfo_subs = %(docinfo#{qualifier}#{suffix}), @attributes['docinfodir'], resolve_docinfo_subs
         unless (docinfo & ['shared', %(shared-#{location})]).empty?
           docinfo_path = normalize_system_path docinfo_file, docinfo_dir
           # NOTE normalizing the lines is essential if we're performing substitutions
-          if (shd_content = (read_asset docinfo_path, :normalize => true))
-            content << (apply_subs shd_content, docinfo_subs)
+          if (shared_docinfo = read_asset docinfo_path, normalize: true)
+            content << (apply_subs shared_docinfo, docinfo_subs)
           end
         end
 
         unless @attributes['docname'].nil_or_empty? || (docinfo & ['private', %(private-#{location})]).empty?
           docinfo_path = normalize_system_path %(#{@attributes['docname']}-#{docinfo_file}), docinfo_dir
           # NOTE normalizing the lines is essential if we're performing substitutions
-          if (pvt_content = (read_asset docinfo_path, :normalize => true))
-            content << (apply_subs pvt_content, docinfo_subs)
+          if (private_docinfo = read_asset docinfo_path, normalize: true)
+            content << (apply_subs private_docinfo, docinfo_subs)
           end
         end
       end
+    end
 
-      # TODO allow document to control whether extension docinfo is contributed
-      if @extensions && (docinfo_processors? location)
-        content += @docinfo_processor_extensions[location].map {|ext| ext.process_method[self] }.compact
-      end
+    # TODO allow document to control whether extension docinfo is contributed
+    if @extensions && (docinfo_processors? location)
+      (content ||= []).concat @docinfo_processor_extensions[location].map {|ext| ext.process_method[self] }.compact
+    end
 
-      content * LF
+    content ? (content.join LF) : ''
+  end
+
+  def docinfo_processors?(location = :head)
+    if @docinfo_processor_extensions.key?(location)
+      # false means we already performed a lookup and didn't find any
+      @docinfo_processor_extensions[location] != false
+    elsif @extensions && @document.extensions.docinfo_processors?(location)
+      !!(@docinfo_processor_extensions[location] = @document.extensions.docinfo_processors(location))
+    else
+      @docinfo_processor_extensions[location] = false
+    end
+  end
+
+  def to_s
+    %(#<#{self.class}@#{object_id} {doctype: #{doctype.inspect}, doctitle: #{(@header != nil ? @header.title : nil).inspect}, blocks: #{@blocks.size}}>)
+  end
+
+  private
+
+  # Internal: Apply substitutions to the attribute value
+  #
+  # If the value is an inline passthrough macro (e.g., pass:<subs>[value]),
+  # apply the substitutions defined in <subs> to the value, or leave the value
+  # unmodified if no substitutions are specified.  If the value is not an
+  # inline passthrough macro, apply header substitutions to the value.
+  #
+  # value - The String attribute value on which to perform substitutions
+  #
+  # Returns The String value with substitutions performed
+  def apply_attribute_value_subs value
+    if AttributeEntryPassMacroRx =~ value
+      $1 ? (apply_subs $2, (resolve_pass_subs $1)) : $2
+    else
+      apply_header_subs value
     end
   end
 
@@ -1195,22 +1108,219 @@ class Document < AbstractBlock
     (@attributes.key? 'docinfosubs') ? (resolve_subs @attributes['docinfosubs'], :block, nil, 'docinfo') : [:attributes]
   end
 
-  def docinfo_processors?(location = :head)
-    if @docinfo_processor_extensions.key?(location)
-      # false means we already performed a lookup and didn't find any
-      @docinfo_processor_extensions[location] != false
+  # Internal: Create and initialize an instance of the converter for this document
+  #--
+  # QUESTION is there any additional information we should be passing to the converter?
+  def create_converter
+    converter_opts = { htmlsyntax: @attributes['htmlsyntax'] }
+    if (template_dirs = @options[:template_dirs] || @options[:template_dir])
+      converter_opts[:template_dirs] = [*template_dirs]
+      converter_opts[:template_cache] = @options.fetch :template_cache, true
+      converter_opts[:template_engine] = @options[:template_engine]
+      converter_opts[:template_engine_options] = @options[:template_engine_options]
+      converter_opts[:eruby] = @options[:eruby]
+      converter_opts[:safe] = @safe
+    end
+    if (converter = @options[:converter])
+      (Converter::Factory.new @backend => converter).create @backend, converter_opts
     else
-      if @extensions && @document.extensions.docinfo_processors?(location)
-        !!(@docinfo_processor_extensions[location] = @document.extensions.docinfo_processors(location))
-      else
-        @docinfo_processor_extensions[location] = false
-      end
+      (Converter::Factory.default false).create @backend, converter_opts
     end
   end
 
-  def to_s
-    %(#<#{self.class}@#{object_id} {doctype: #{doctype.inspect}, doctitle: #{(@header != nil ? @header.title : nil).inspect}, blocks: #{@blocks.size}}>)
+  # Internal: Delete any attributes stored for playback
+  def clear_playback_attributes(attributes)
+    attributes.delete(:attribute_entries)
   end
 
+  # Internal: Branch the attributes so that the original state can be restored
+  # at a future time.
+  #
+  # Returns the duplicated attributes, which will later be restored
+  def save_attributes
+    unless ((attrs = @attributes).key? 'doctitle') || !(doctitle_val = doctitle)
+      attrs['doctitle'] = doctitle_val
+    end
+
+    # css-signature cannot be updated after header attributes are processed
+    @id = attrs['css-signature'] unless @id
+
+    if (toc_val = (attrs.delete 'toc2') ? 'left' : attrs['toc'])
+      # toc-placement allows us to separate position from using fitted slot vs macro
+      toc_position_val = (toc_placement_val = attrs.fetch 'toc-placement', 'macro') && toc_placement_val != 'auto' ? toc_placement_val : attrs['toc-position']
+      unless toc_val.empty? && toc_position_val.nil_or_empty?
+        default_toc_position = 'left'
+        # TODO rename toc2 to aside-toc
+        default_toc_class = 'toc2'
+        position = toc_position_val.nil_or_empty? ? (toc_val.empty? ? default_toc_position : toc_val) : toc_position_val
+        attrs['toc'] = ''
+        attrs['toc-placement'] = 'auto'
+        case position
+        when 'left', '<', '&lt;'
+          attrs['toc-position'] = 'left'
+        when 'right', '>', '&gt;'
+          attrs['toc-position'] = 'right'
+        when 'top', '^'
+          attrs['toc-position'] = 'top'
+        when 'bottom', 'v'
+          attrs['toc-position'] = 'bottom'
+        when 'preamble', 'macro'
+          attrs['toc-position'] = 'content'
+          attrs['toc-placement'] = position
+          default_toc_class = nil
+        else
+          attrs.delete 'toc-position'
+          default_toc_class = nil
+        end
+        attrs['toc-class'] ||= default_toc_class if default_toc_class
+      end
+    end
+
+    if (icons_val = attrs['icons']) && !(attrs.key? 'icontype')
+      case icons_val
+      when '', 'font'
+      else
+        attrs['icons'] = ''
+        attrs['icontype'] = icons_val
+      end
+    end
+
+    if (@compat_mode = attrs.key? 'compat-mode')
+      attrs['source-language'] = attrs['language'] if attrs.key? 'language'
+    end
+
+    unless @parent_document
+      if (basebackend = attrs['basebackend']) == 'html'
+        # QUESTION should we allow source-highlighter to be disabled in AsciiDoc table cell?
+        if (syntax_hl_name = attrs['source-highlighter']) && !attrs[%(#{syntax_hl_name}-unavailable)]
+          if (syntax_hl_factory = @options[:syntax_highlighter_factory])
+            @syntax_highlighter = syntax_hl_factory.create syntax_hl_name, @backend, document: self
+          elsif (syntax_hls = @options[:syntax_highlighters])
+            @syntax_highlighter = (SyntaxHighlighter::DefaultFactoryProxy.new syntax_hls).create syntax_hl_name, @backend, document: self
+          else
+            @syntax_highlighter = SyntaxHighlighter.create syntax_hl_name, @backend, document: self
+          end
+        end
+      # enable toc and sectnums (i.e., numbered) by default in DocBook backend
+      elsif basebackend == 'docbook'
+        # NOTE the attributes_modified should go away once we have a proper attribute storage & tracking facility
+        attrs['toc'] = '' unless (attribute_locked? 'toc') || (@attributes_modified.include? 'toc')
+        attrs['sectnums'] = '' unless (attribute_locked? 'sectnums') || (@attributes_modified.include? 'sectnums')
+      end
+
+      # NOTE pin the outfilesuffix after the header is parsed
+      @outfilesuffix = attrs['outfilesuffix']
+
+      # unfreeze "flexible" attributes
+      FLEXIBLE_ATTRIBUTES.each do |name|
+        # turning a flexible attribute off should be permanent
+        # (we may need more config if that's not always the case)
+        if @attribute_overrides.key?(name) && @attribute_overrides[name]
+          @attribute_overrides.delete(name)
+        end
+      end
+    end
+
+    @header_attributes = attrs.dup
+  end
+
+  # Internal: Update the backend attributes to reflect a change in the active backend.
+  #
+  # This method also handles updating the related doctype attributes if the
+  # doctype attribute is assigned at the time this method is called.
+  #
+  # Returns the resolved String backend if updated, nothing otherwise.
+  def update_backend_attributes new_backend, force = nil
+    if force || (new_backend && new_backend != @backend)
+      current_backend, current_basebackend, current_doctype = @backend, (attrs = @attributes)['basebackend'], @doctype
+      if new_backend.start_with? 'xhtml'
+        attrs['htmlsyntax'] = 'xml'
+        new_backend = new_backend.slice 1, new_backend.length
+      elsif new_backend.start_with? 'html'
+        attrs['htmlsyntax'] = 'html' unless attrs['htmlsyntax'] == 'xml'
+      end
+      if (resolved_backend = BACKEND_ALIASES[new_backend])
+        new_backend = resolved_backend
+      end
+      if current_doctype
+        if current_backend
+          attrs.delete %(backend-#{current_backend})
+          attrs.delete %(backend-#{current_backend}-doctype-#{current_doctype})
+        end
+        attrs[%(backend-#{new_backend}-doctype-#{current_doctype})] = ''
+        attrs[%(doctype-#{current_doctype})] = ''
+      elsif current_backend
+        attrs.delete %(backend-#{current_backend})
+      end
+      attrs[%(backend-#{new_backend})] = ''
+      @backend = attrs['backend'] = new_backend
+      # (re)initialize converter
+      if Converter::BackendInfo === (@converter = create_converter)
+        new_basebackend = @converter.basebackend
+        attrs['outfilesuffix'] = @converter.outfilesuffix unless attribute_locked? 'outfilesuffix'
+        new_filetype = @converter.filetype
+      elsif @converter
+        new_basebackend = new_backend.sub TrailingDigitsRx, ''
+        if (new_outfilesuffix = DEFAULT_EXTENSIONS[new_basebackend])
+          new_filetype = new_outfilesuffix.slice 1, new_outfilesuffix.length
+        else
+          new_outfilesuffix, new_basebackend, new_filetype = '.html', 'html', 'html'
+        end
+        attrs['outfilesuffix'] = new_outfilesuffix unless attribute_locked? 'outfilesuffix'
+      else
+        # NOTE ideally we shouldn't need the converter before the converter phase, but we do
+        raise ::NotImplementedError, %(asciidoctor: FAILED: missing converter for backend '#{new_backend}'. Processing aborted.)
+      end
+      if (current_filetype = attrs['filetype'])
+        attrs.delete %(filetype-#{current_filetype})
+      end
+      attrs['filetype'] = new_filetype
+      attrs[%(filetype-#{new_filetype})] = ''
+      if (page_width = DEFAULT_PAGE_WIDTHS[new_basebackend])
+        attrs['pagewidth'] = page_width
+      else
+        attrs.delete 'pagewidth'
+      end
+      if new_basebackend != current_basebackend
+        if current_doctype
+          if current_basebackend
+            attrs.delete %(basebackend-#{current_basebackend})
+            attrs.delete %(basebackend-#{current_basebackend}-doctype-#{current_doctype})
+          end
+          attrs[%(basebackend-#{new_basebackend}-doctype-#{current_doctype})] = ''
+        elsif current_basebackend
+          attrs.delete %(basebackend-#{current_basebackend})
+        end
+        attrs[%(basebackend-#{new_basebackend})] = ''
+        attrs['basebackend'] = new_basebackend
+      end
+      return new_backend
+    end
+  end
+
+  # Internal: Update the doctype and backend attributes to reflect a change in the active doctype.
+  #
+  # Returns the String doctype if updated, nothing otherwise.
+  def update_doctype_attributes new_doctype
+    if new_doctype && new_doctype != @doctype
+      current_backend, current_basebackend, current_doctype = @backend, (attrs = @attributes)['basebackend'], @doctype
+      if current_doctype
+        attrs.delete %(doctype-#{current_doctype})
+        if current_backend
+          attrs.delete %(backend-#{current_backend}-doctype-#{current_doctype})
+          attrs[%(backend-#{current_backend}-doctype-#{new_doctype})] = ''
+        end
+        if current_basebackend
+          attrs.delete %(basebackend-#{current_basebackend}-doctype-#{current_doctype})
+          attrs[%(basebackend-#{current_basebackend}-doctype-#{new_doctype})] = ''
+        end
+      else
+        attrs[%(backend-#{current_backend}-doctype-#{new_doctype})] = '' if current_backend
+        attrs[%(basebackend-#{current_basebackend}-doctype-#{new_doctype})] = '' if current_basebackend
+      end
+      attrs[%(doctype-#{new_doctype})] = ''
+      return @doctype = attrs['doctype'] = new_doctype
+    end
+  end
 end
 end

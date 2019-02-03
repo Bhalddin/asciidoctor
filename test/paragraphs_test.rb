@@ -1,31 +1,27 @@
-# encoding: UTF-8
-unless defined? ASCIIDOCTOR_PROJECT_DIR
-  $: << File.dirname(__FILE__); $:.uniq!
-  require 'test_helper'
-end
+require_relative 'test_helper'
 
 context 'Paragraphs' do
   context 'Normal' do
     test 'should treat plain text separated by blank lines as paragraphs' do
-      input = <<-EOS
-Plain text for the win!
+      input = <<~'EOS'
+      Plain text for the win!
 
-Yep. Text. Plain and simple.
+      Yep. Text. Plain and simple.
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css 'p', output, 2
       assert_xpath '(//p)[1][text() = "Plain text for the win!"]', output, 1
       assert_xpath '(//p)[2][text() = "Yep. Text. Plain and simple."]', output, 1
     end
 
     test 'should associate block title with paragraph' do
-      input = <<-EOS
-.Titled
-Paragraph.
+      input = <<~'EOS'
+      .Titled
+      Paragraph.
 
-Winning.
+      Winning.
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
 
       assert_css 'p', output, 2
       assert_xpath '(//p)[1]/preceding-sibling::*[@class = "title"]', output, 1
@@ -34,127 +30,128 @@ Winning.
     end
 
     test 'no duplicate block before next section' do
-      input = <<-EOS
-= Title
+      input = <<~'EOS'
+      = Title
 
-Preamble
+      Preamble
 
-== First Section
+      == First Section
 
-Paragraph 1
+      Paragraph 1
 
-Paragraph 2
+      Paragraph 2
 
-== Second Section
+      == Second Section
 
-Last words
+      Last words
       EOS
 
-      output = render_string input
+      output = convert_string input
       assert_xpath '//p[text() = "Paragraph 2"]', output, 1
     end
 
     test 'does not treat wrapped line as a list item' do
-      input = <<-EOS
-paragraph
-. wrapped line
+      input = <<~'EOS'
+      paragraph
+      . wrapped line
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css 'p', output, 1
       assert_xpath %(//p[text()="paragraph\n. wrapped line"]), output, 1
     end
 
     test 'does not treat wrapped line as a block title' do
-      input = <<-EOS
-paragraph
-.wrapped line
+      input = <<~'EOS'
+      paragraph
+      .wrapped line
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css 'p', output, 1
       assert_xpath %(//p[text()="paragraph\n.wrapped line"]), output, 1
     end
 
     test 'interprets normal paragraph style as normal paragraph' do
-      input = <<-EOS
-[normal]
-Normal paragraph.
-Nothing special.
+      input = <<~'EOS'
+      [normal]
+      Normal paragraph.
+      Nothing special.
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css 'p', output, 1
     end
 
     test 'removes indentation from literal paragraph marked as normal' do
-      input = <<-EOS
-[normal]
-  Normal paragraph.
-    Nothing special.
-  Last line.
+      # NOTE JRuby does not preserve indentation in single-quoted heredoc string; see https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      [normal]
+        Normal paragraph.
+          Nothing special.
+        Last line.
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css 'p', output, 1
       assert_xpath %(//p[text()="Normal paragraph.\n  Nothing special.\nLast line."]), output, 1
     end
 
     test 'normal paragraph terminates at block attribute list' do
-      input = <<-EOS
-normal text
-[literal]
-literal text
+      input = <<~'EOS'
+      normal text
+      [literal]
+      literal text
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css '.paragraph:root', output, 1
       assert_css '.literalblock:root', output, 1
     end
 
     test 'normal paragraph terminates at block delimiter' do
-      input = <<-EOS
-normal text
---
-text in open block
---
+      input = <<~'EOS'
+      normal text
+      --
+      text in open block
+      --
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css '.paragraph:root', output, 1
       assert_css '.openblock:root', output, 1
     end
 
     test 'normal paragraph terminates at list continuation' do
-      input = <<-EOS
-normal text
-+
+      input = <<~'EOS'
+      normal text
+      +
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css '.paragraph:root', output, 2
       assert_xpath %((/*[@class="paragraph"])[1]/p[text() = "normal text"]), output, 1
       assert_xpath %((/*[@class="paragraph"])[2]/p[text() = "+"]), output, 1
     end
 
     test 'normal style turns literal paragraph into normal paragraph' do
-      input = <<-EOS
-[normal]
- normal paragraph,
- despite the leading indent
+      input = <<~'EOS'
+      [normal]
+       normal paragraph,
+       despite the leading indent
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css '.paragraph:root > p', output, 1
     end
 
     test 'expands index term macros in DocBook backend' do
-      input = <<-EOS
-Here is an index entry for ((tigers)).
-indexterm:[Big cats,Tigers,Siberian Tiger]
-Here is an index entry for indexterm2:[Linux].
-(((Operating Systems,Linux,Fedora)))
-Note that multi-entry terms generate separate index entries.
+      input = <<~'EOS'
+      Here is an index entry for ((tigers)).
+      indexterm:[Big cats,Tigers,Siberian Tiger]
+      Here is an index entry for indexterm2:[Linux].
+      (((Operating Systems,Linux,Fedora)))
+      Note that multi-entry terms generate separate index entries.
       EOS
 
-      output = render_embedded_string input, :attributes => {'backend' => 'docbook45'}
+      output = convert_string_to_embedded input, attributes: { 'backend' => 'docbook45' }
       assert_xpath '/simpara', output, 1
       term1 = xmlnodes_at_xpath '(//indexterm)[1]', output, 1
       assert_equal '<indexterm><primary>tigers</primary></indexterm>', term1.to_s
@@ -188,34 +185,34 @@ Note that multi-entry terms generate separate index entries.
     end
 
     test 'normal paragraph should honor explicit subs list' do
-      input = <<-EOS
-[subs="specialcharacters"]
-*<Hey Jude>*
+      input = <<~'EOS'
+      [subs="specialcharacters"]
+      *<Hey Jude>*
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_includes output, '*&lt;Hey Jude&gt;*'
     end
 
     test 'normal paragraph should honor specialchars shorthand' do
-      input = <<-EOS
-[subs="specialchars"]
-*<Hey Jude>*
+      input = <<~'EOS'
+      [subs="specialchars"]
+      *<Hey Jude>*
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_includes output, '*&lt;Hey Jude&gt;*'
     end
 
     test 'should add a hardbreak at end of each line when hardbreaks option is set' do
-      input = <<-EOS
-[%hardbreaks]
-read
-my
-lips
+      input = <<~'EOS'
+      [%hardbreaks]
+      read
+      my
+      lips
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css 'br', output, 2
       assert_xpath '//p', output, 1
       assert_includes output, "<p>read<br>\nmy<br>\nlips</p>"
@@ -224,107 +221,114 @@ lips
 
   context 'Literal' do
     test 'single-line literal paragraphs' do
-      input = <<-EOS
- LITERALS
+      # NOTE JRuby does not preserve indentation in single-quoted heredoc string; see https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      you know what?
 
- ARE LITERALLY
+       LITERALS
 
- AWESOME!
+       ARE LITERALLY
+
+       AWESOME!
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath '//pre', output, 3
     end
 
     test 'multi-line literal paragraph' do
-      input = <<-EOS
-Install instructions:
+      # NOTE JRuby does not preserve indentation in single-quoted heredoc string; see https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      Install instructions:
 
- yum install ruby rubygems
- gem install asciidoctor
+       yum install ruby rubygems
+       gem install asciidoctor
 
-You're good to go!
+      You're good to go!
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath '//pre', output, 1
       # indentation should be trimmed from literal block
       assert_xpath %(//pre[text() = "yum install ruby rubygems\ngem install asciidoctor"]), output, 1
     end
 
     test 'literal paragraph' do
-      input = <<-EOS
-[literal]
-this text is literally literal
+      input = <<~'EOS'
+      [literal]
+      this text is literally literal
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="literalblock"]//pre[text()="this text is literally literal"]), output, 1
     end
 
     test 'should read content below literal style verbatim' do
-      input = <<-EOS
-[literal]
-image::not-an-image-block[]
+      input = <<~'EOS'
+      [literal]
+      image::not-an-image-block[]
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="literalblock"]//pre[text()="image::not-an-image-block[]"]), output, 1
       assert_css 'img', output, 0
     end
 
     test 'listing paragraph' do
-      input = <<-EOS
-[listing]
-this text is a listing
+      input = <<~'EOS'
+      [listing]
+      this text is a listing
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="listingblock"]//pre[text()="this text is a listing"]), output, 1
     end
 
     test 'source paragraph' do
-      input = <<-EOS
-[source]
-use the source, luke!
+      input = <<~'EOS'
+      [source]
+      use the source, luke!
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="listingblock"]//pre[@class="highlight"]/code[text()="use the source, luke!"]), output, 1
     end
 
     test 'source code paragraph with language' do
-      input = <<-EOS
-[source, perl]
-die 'zomg perl sucks';
+      input = <<~'EOS'
+      [source, perl]
+      die 'zomg perl is tough';
       EOS
-      output = render_embedded_string input
-      assert_xpath %(/*[@class="listingblock"]//pre[@class="highlight"]/code[@class="language-perl"][@data-lang="perl"][text()="die 'zomg perl sucks';"]), output, 1
+      output = convert_string_to_embedded input
+      assert_xpath %(/*[@class="listingblock"]//pre[@class="highlight"]/code[@class="language-perl"][@data-lang="perl"][text()="die 'zomg perl is tough';"]), output, 1
     end
 
     test 'literal paragraph terminates at block attribute list' do
-      input = <<-EOS
- literal text
-[normal]
-normal text
+      # NOTE JRuby does not preserve indentation in single-quoted heredoc string; see https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+       literal text
+      [normal]
+      normal text
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="literalblock"]), output, 1
       assert_xpath %(/*[@class="paragraph"]), output, 1
     end
 
     test 'literal paragraph terminates at block delimiter' do
-      input = <<-EOS
- literal text
---
-normal text
---
+      # NOTE JRuby does not preserve indentation in single-quoted heredoc string; see https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+       literal text
+      --
+      normal text
+      --
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="literalblock"]), output, 1
       assert_xpath %(/*[@class="openblock"]), output, 1
     end
 
     test 'literal paragraph terminates at list continuation' do
-      input = <<-EOS
- literal text
-+
+      # NOTE JRuby does not preserve indentation in single-quoted heredoc string; see https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+       literal text
+      +
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_xpath %(/*[@class="literalblock"]), output, 1
       assert_xpath %(/*[@class="literalblock"]//pre[text() = "literal text"]), output, 1
       assert_xpath %(/*[@class="paragraph"]), output, 1
@@ -334,30 +338,30 @@ normal text
 
   context 'Quote' do
     test "single-line quote paragraph" do
-      input = <<-EOS
-[quote]
-Famous quote.
+      input = <<~'EOS'
+      [quote]
+      Famous quote.
       EOS
-      output = render_string input
+      output = convert_string input
       assert_xpath '//*[@class = "quoteblock"]', output, 1
       assert_xpath '//*[@class = "quoteblock"]//p', output, 0
       assert_xpath '//*[@class = "quoteblock"]//*[contains(text(), "Famous quote.")]', output, 1
     end
 
     test 'quote paragraph terminates at list continuation' do
-      input = <<-EOS
-[quote]
-A famouse quote.
-+
+      input = <<~'EOS'
+      [quote]
+      A famouse quote.
+      +
       EOS
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_css '.quoteblock:root', output, 1
       assert_css '.paragraph:root', output, 1
       assert_xpath %(/*[@class="paragraph"]/p[text() = "+"]), output, 1
     end
 
     test "verse paragraph" do
-      output = render_string("[verse]\nFamous verse.")
+      output = convert_string("[verse]\nFamous verse.")
       assert_xpath '//*[@class = "verseblock"]', output, 1
       assert_xpath '//*[@class = "verseblock"]/pre', output, 1
       assert_xpath '//*[@class = "verseblock"]//p', output, 0
@@ -365,23 +369,23 @@ A famouse quote.
     end
 
     test 'should perform normal subs on a verse paragraph' do
-      input = <<-EOS
-[verse]
-_GET /groups/link:#group-id[\{group-id\}]_
+      input = <<~'EOS'
+      [verse]
+      _GET /groups/link:#group-id[\{group-id\}]_
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_includes output, '<pre class="content"><em>GET /groups/<a href="#group-id">{group-id}</a></em></pre>'
     end
 
     test 'quote paragraph should honor explicit subs list' do
-      input = <<-EOS
-[subs="specialcharacters"]
-[quote]
-*Hey Jude*
+      input = <<~'EOS'
+      [subs="specialcharacters"]
+      [quote]
+      *Hey Jude*
       EOS
 
-      output = render_embedded_string input
+      output = convert_string_to_embedded input
       assert_includes output, '*Hey Jude*'
     end
   end
@@ -389,88 +393,79 @@ _GET /groups/link:#group-id[\{group-id\}]_
   context "special" do
     test "note multiline syntax" do
       Asciidoctor::ADMONITION_STYLES.each do |style|
-        assert_xpath "//div[@class='admonitionblock #{style.downcase}']", render_string("[#{style}]\nThis is a winner.")
+        assert_xpath "//div[@class='admonitionblock #{style.downcase}']", convert_string("[#{style}]\nThis is a winner.")
       end
     end
 
     test "note block syntax" do
       Asciidoctor::ADMONITION_STYLES.each do |style|
-        assert_xpath "//div[@class='admonitionblock #{style.downcase}']", render_string("[#{style}]\n====\nThis is a winner.\n====")
+        assert_xpath "//div[@class='admonitionblock #{style.downcase}']", convert_string("[#{style}]\n====\nThis is a winner.\n====")
       end
     end
 
     test "note inline syntax" do
       Asciidoctor::ADMONITION_STYLES.each do |style|
-        assert_xpath "//div[@class='admonitionblock #{style.downcase}']", render_string("#{style}: This is important, fool!")
+        assert_xpath "//div[@class='admonitionblock #{style.downcase}']", convert_string("#{style}: This is important, fool!")
       end
     end
 
-    test "sidebar block" do
-      input = <<-EOS
-== Section
-
-.Sidebar
-****
-Content goes here
-****
-      EOS
-      result = render_string(input)
-      assert_xpath "//*[@class='sidebarblock']//p", result, 1
-    end
-
-    test 'should process preprocessor conditional in paragrpah content' do
-      input = <<-EOS
-ifdef::asciidoctor-version[]
-[sidebar]
-First line of sidebar.
-ifdef::backend[The backend is {backend}.]
-Last line of sidebar.
-endif::[]
+    test 'should process preprocessor conditional in paragraph content' do
+      input = <<~'EOS'
+      ifdef::asciidoctor-version[]
+      [sidebar]
+      First line of sidebar.
+      ifdef::backend[The backend is {backend}.]
+      Last line of sidebar.
+      endif::[]
       EOS
 
-      result = render_embedded_string input
-      assert_equal %(<div class="sidebarblock">
-<div class="content">
-First line of sidebar.
-The backend is html5.
-Last line of sidebar.
-</div>
-</div>), result
+      expected = <<~'EOS'.chomp
+      <div class="sidebarblock">
+      <div class="content">
+      First line of sidebar.
+      The backend is html5.
+      Last line of sidebar.
+      </div>
+      </div>
+      EOS
+
+      result = convert_string_to_embedded input
+      assert_equal expected, result
     end
 
     context 'Styled Paragraphs' do
-      test 'should wrap text in simpara for styled paragraphs when rendered to DocBook' do
-        input = <<-EOS
-= Book
-:doctype: book
+      test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
+        input = <<~'EOS'
+        = Book
+        :doctype: book
 
-[preface]
-= About this book
+        [preface]
+        = About this book
 
-[abstract]
-An abstract for the book.
+        [abstract]
+        An abstract for the book.
 
-= Part 1
+        = Part 1
 
-[partintro]
-An intro to this part.
+        [partintro]
+        An intro to this part.
 
-== Chapter 1
+        == Chapter 1
 
-[sidebar]
-Just a side note.
+        [sidebar]
+        Just a side note.
 
-[example]
-As you can see here.
+        [example]
+        As you can see here.
 
-[quote]
-Wise words from a wise person.
+        [quote]
+        Wise words from a wise person.
 
-[open]
-Make it what you want.
+        [open]
+        Make it what you want.
         EOS
 
-        output = render_string input, :backend => 'docbook'
+        output = convert_string input, backend: 'docbook'
         assert_css 'abstract > simpara', output, 1
         assert_css 'partintro > simpara', output, 1
         assert_css 'sidebar > simpara', output, 1
@@ -480,50 +475,50 @@ Make it what you want.
       end
 
       test 'should convert open paragraph to open block' do
-        input = <<-EOS
-[open]
-Make it what you want.
+        input = <<~'EOS'
+        [open]
+        Make it what you want.
         EOS
 
-        output = render_embedded_string input
+        output = convert_string_to_embedded input
         assert_css '.openblock', output, 1
         assert_css '.openblock p', output, 0
       end
 
-      test 'should wrap text in simpara for styled paragraphs with title when rendered to DocBook' do
-        input = <<-EOS
-= Book
-:doctype: book
+      test 'should wrap text in simpara for styled paragraphs with title when converted to DocBook' do
+        input = <<~'EOS'
+        = Book
+        :doctype: book
 
-[preface]
-= About this book
+        [preface]
+        = About this book
 
-[abstract]
-.Abstract title
-An abstract for the book.
+        [abstract]
+        .Abstract title
+        An abstract for the book.
 
-= Part 1
+        = Part 1
 
-[partintro]
-.Part intro title
-An intro to this part.
+        [partintro]
+        .Part intro title
+        An intro to this part.
 
-== Chapter 1
+        == Chapter 1
 
-[sidebar]
-.Sidebar title
-Just a side note.
+        [sidebar]
+        .Sidebar title
+        Just a side note.
 
-[example]
-.Example title
-As you can see here.
+        [example]
+        .Example title
+        As you can see here.
 
-[quote]
-.Quote title
-Wise words from a wise person.
+        [quote]
+        .Quote title
+        Wise words from a wise person.
         EOS
 
-        output = render_string input, :backend => 'docbook'
+        output = convert_string input, backend: 'docbook'
         assert_css 'abstract > title', output, 1
         assert_xpath '//abstract/title[text() = "Abstract title"]', output, 1
         assert_css 'abstract > title + simpara', output, 1
@@ -545,19 +540,17 @@ Wise words from a wise person.
     context 'Inline doctype' do
       test 'should only format and output text in first paragraph when doctype is inline' do
         input = "http://asciidoc.org[AsciiDoc] is a _lightweight_ markup language...\n\nignored"
-        output = render_string input, :doctype => 'inline'
+        output = convert_string input, doctype: 'inline'
         assert_equal '<a href="http://asciidoc.org">AsciiDoc</a> is a <em>lightweight</em> markup language&#8230;&#8203;', output
       end
 
       test 'should output nil and warn if first block is not a paragraph' do
         input = '* bullet'
-        output = nil
-        warnings = redirect_streams do |_, err|
-          output =  render_string input, :doctype => 'inline'
-          err.string
+        using_memory_logger do |logger|
+          output = convert_string input, doctype: 'inline'
+          assert_nil output
+          assert_message logger, :WARN, '~no inline candidate'
         end
-        assert_nil output
-        assert_includes warnings, 'no inline candidate'
       end
     end
   end
